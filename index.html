@@ -1588,16 +1588,16 @@ async function downloadScoreSheet(){
  const tasks=allTasks.filter(x=>sheetType==='summative'?x.activityType==='exam':x.activityType!=='exam');
  if(!tasks.length)return alert(`No ${sheetType} assessment activities have been configured for this term.`);
  const subject=byId(data.subjects,sid)?.name||'', className=cls(cid)||'';
- const metaRows=[['VAO Academy Score Sheet'],['School',data.school.name],['Academic Year',data.school.year],['Term',term],['Assessment Type',sheetType==='summative'?'Summative':'Formative'],['Subject',subject],['Class',className],['Instruction','Do not change Student ID, Admission No. or Student Name. Enter marks only. Leave blank to keep an existing score unchanged.']];
+ const metaRows=[['VAO Academy Score Sheet'],['School',data.school.name],['Academic Year',data.school.year],['Term',term],['Assessment Type',sheetType==='summative'?'Summative':'Formative'],['Subject',subject],['Class',className],['Instruction',sheetType==='summative'?'Do not change Student ID, Admission No. or Student Name. Enter Summative marks out of 100. The system converts them automatically to the configured Summative maximum (normally 60). Leave blank to keep an existing score unchanged.':'Do not change Student ID, Admission No. or Student Name. Enter marks up to each activity maximum. Leave blank to keep an existing score unchanged.']];
  const headers=['STUDENT_ID','ADMISSION_NO','STUDENT_NAME',...tasks.map(taskColumnCode)];
- const maxRow=['','','',...tasks.map(x=>x.maxMark)];
+ const maxRow=['','','',...tasks.map(x=>sheetType==='summative'?100:x.maxMark)];
  const students=data.students.filter(s=>s.classId===cid);
  const scores=data.taskScores||[];
- const rows=students.map(s=>[s.id,s.admission||'',s.name,...tasks.map(task=>{const x=scores.find(z=>z.scheduleId===task.id&&z.studentId===s.id&&z.teacherId===t.id&&z.subjectId===sid&&z.classId===cid); return x?.mark??'';})]);
+ const rows=students.map(s=>[s.id,s.admission||'',s.name,...tasks.map(task=>{const x=scores.find(z=>z.scheduleId===task.id&&z.studentId===s.id&&z.teacherId===t.id&&z.subjectId===sid&&z.classId===cid); if(x?.mark===undefined||x?.mark===null)return ''; return sheetType==='summative'?Number((Number(x.mark)*100/Number(task.maxMark||60)).toFixed(2)):x.mark;})]);
  const ws=XLSX.utils.aoa_to_sheet([...metaRows,[],headers,maxRow,...rows]);
  ws['!cols']=[{wch:38},{wch:20},{wch:30},...tasks.map(()=>({wch:14}))];
- const ins=XLSX.utils.aoa_to_sheet([['Activity Code','Activity','Max Mark','Deadline'],...tasks.map(s=>[taskColumnCode(s),`${s.activityType} ${s.activityNumber}`,s.maxMark,s.dueAt?new Date(s.dueAt).toLocaleString():'No deadline'])]);
- ins['!cols']=[{wch:18},{wch:28},{wch:12},{wch:28}];
+ const ins=XLSX.utils.aoa_to_sheet([['Activity Code','Activity','Teacher Entry Maximum','Stored Maximum','Deadline'],...tasks.map(s=>[taskColumnCode(s),`${s.activityType} ${s.activityNumber}`,sheetType==='summative'?100:s.maxMark,s.maxMark,s.dueAt?new Date(s.dueAt).toLocaleString():'No deadline'])]);
+ ins['!cols']=[{wch:18},{wch:28},{wch:22},{wch:16},{wch:28}];
  const safe=(className+'_'+subject+'_'+term+'_'+sheetType).replace(/[^A-Za-z0-9_-]+/g,'_');
  const scoreMatrix=XLSX.utils.sheet_to_json(ws,{header:1,defval:''});
  const instructionsMatrix=XLSX.utils.sheet_to_json(ins,{header:1,defval:''});
@@ -1612,23 +1612,32 @@ async function uploadScoreSheet(input){
  const file=input?.files?.[0]; if(!file)return;
  if(!window.XLSX){alert('Excel support is still loading. Please try again.');input.value='';return;}
  const t=me(),pair=document.getElementById('es')?.value||'|',[sid,cid]=pair.split('|'),term=document.getElementById('et')?.value||'Term 1';
+ const sheetType=document.getElementById('scoreSheetType')?.value||'formative';
  if(!t||!sid||!cid){alert('Select subject/class first.');input.value='';return;}
  if(!assigned(t,sid,cid,term)){alert('This teacher is not assigned to this subject/class for the selected term.');input.value='';return;}
  try{
    const buf=await file.arrayBuffer();
    const wb=XLSX.read(buf,{type:'array'});
    const ws=wb.Sheets['Score Sheet']||wb.Sheets[wb.SheetNames[0]];
+   if(!ws)throw new Error('Score Sheet worksheet was not found.');
    const matrix=XLSX.utils.sheet_to_json(ws,{header:1,defval:''});
    const headerIndex=matrix.findIndex(row=>row.map(normalizeSheetHeader).includes('STUDENT_ID'));
    if(headerIndex<0)throw new Error('Score sheet header row not found. Use the VAO Academy downloaded score sheet.');
    const headers=matrix[headerIndex].map(normalizeSheetHeader);
+   for(const required of ['STUDENT_ID','ADMISSION_NO','STUDENT_NAME']){
+     if(!headers.includes(required))throw new Error(`The score sheet is missing the ${required} column.`);
+   }
    const dataRows=matrix.slice(headerIndex+1).filter(r=>{
      const id=String(r[headers.indexOf('STUDENT_ID')]??'').trim();
      const adm=String(r[headers.indexOf('ADMISSION_NO')]??'').trim();
      const name=String(r[headers.indexOf('STUDENT_NAME')]??'').trim();
      return !!(id||adm||name);
    });
-   const tasks=activeTaskSchedules(term), taskByCode=Object.fromEntries(tasks.map(x=>[taskColumnCode(x),x]));
+   const allTasks=activeTaskSchedules(term);
+   // Summative uses exam activities only; Formative uses all non-exam activities.
+   const tasks=allTasks.filter(x=>sheetType==='summative'?x.activityType==='exam':x.activityType!=='exam');
+   if(!tasks.length)throw new Error(`No ${sheetType} assessment activities have been configured for this term.`);
+   const taskByCode=Object.fromEntries(tasks.map(x=>[taskColumnCode(x),x]));
    const students=data.students.filter(s=>s.classId===cid), byStudentId=Object.fromEntries(students.map(s=>[s.id,s])), byAdmission=Object.fromEntries(students.filter(s=>s.admission).map(s=>[String(s.admission),s]));
    const errors=[], parsed=[], taskIdsUsed=new Set();
    for(let ri=0;ri<dataRows.length;ri++){
@@ -1638,9 +1647,16 @@ async function uploadScoreSheet(input){
      for(const code of Object.keys(taskByCode)){
        const ci=headers.indexOf(code); if(ci<0)continue;
        const raw=row[ci]; if(raw===''||raw===null||raw===undefined)continue;
-       const mark=Number(raw), sch=taskByCode[code];
-       if(!Number.isFinite(mark)||mark<0||mark>Number(sch.maxMark)){errors.push(`${student.name} ${code}: mark must be between 0 and ${sch.maxMark}.`);continue;}
-       parsed.push({scheduleId:sch.id,studentId:student.id,mark});
+       const enteredMark=Number(raw), sch=taskByCode[code], storedMax=Number(sch.maxMark);
+       if(!Number.isFinite(enteredMark)||enteredMark<0||(sheetType==='summative'?enteredMark>100:enteredMark>storedMax)){
+         errors.push(`${student.name} ${code}: mark must be between 0 and ${sheetType==='summative'?100:storedMax}.`);continue;
+       }
+       // Teachers enter Summative marks out of 100. Store them proportionally
+       // against the configured exam maximum (normally 60) before rebuilding results.
+       const storedMark=sheetType==='summative'
+         ? Number((enteredMark*storedMax/100).toFixed(2))
+         : enteredMark;
+       parsed.push({scheduleId:sch.id,studentId:student.id,mark:storedMark});
        taskIdsUsed.add(sch.id);
      }
    }
@@ -1663,7 +1679,7 @@ async function uploadScoreSheet(input){
    if(rpcError)throw rpcError;
    await loadOnlineData();
    const p=parsed.length;
-   alert(`Score sheet processed successfully. ${p} marks were imported and results were updated.`);
+   alert(`Score sheet processed successfully. ${p} marks were imported${sheetType==='summative'?' and converted from /100 to the configured Summative scale':''}. Results were updated.`);
    input.value=''; go('enter');
  }catch(e){alert(e.message||'Could not process the score sheet.'); input.value='';}
 }
