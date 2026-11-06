@@ -244,7 +244,7 @@ function uid(p){return p+Date.now().toString(36)+Math.random().toString(36).slic
 function byId(arr,id){return arr.find(x=>x.id===id)}
 function cls(id){let x=byId(data.classes,id);return x?x.name+(x.stream?" "+x.stream:""):""}
 function grade(x){const g=data.school||{};return x>=Number(g.gradeAMin??75)?"A":x>=Number(g.gradeBMin??60)?"B":x>=Number(g.gradeCMin??50)?"C":x>=Number(g.gradeDMin??40)?"D":"F"}
-function remark(x){return x>=Number(data.school?.gradeCMin??50)?"PASS":"FAIL"}
+function remark(x){return Number(x)>=Number(data.school?.gradeDMin??40)?"PASS":"FAIL"}
 
 function login(){
  const role=document.getElementById("loginRole").value,u=document.getElementById("loginUser").value.trim(),p=document.getElementById("loginPass").value;
@@ -556,8 +556,12 @@ async function saveProfile(){
    termDates[key]={start:document.getElementById(`start_${suffix}`)?.value||'',end:document.getElementById(`end_${suffix}`)?.value||''};
    if(termDates[key].start && termDates[key].end && termDates[key].start>termDates[key].end)return alert(`${key}: Start Date cannot be after End Date.`);
  }
- const {error}=await supabaseClient.from('schools').update({name,code,logo_url:logoUrl,term_count:termCount,assessment_missing_policy:assessmentMissingPolicy,grade_a_min:gradeAMin,grade_b_min:gradeBMin,grade_c_min:gradeCMin,grade_d_min:gradeDMin}).eq('id',currentSchoolId);
- if(error)return alert(error.message);
+ if(!currentSchoolId)return alert('Your login is not linked to a school. Please sign out and sign in again.');
+ const {data:savedSchool,error}=await supabaseClient.from('schools').update({name,code,logo_url:logoUrl,term_count:termCount,assessment_missing_policy:assessmentMissingPolicy,grade_a_min:gradeAMin,grade_b_min:gradeBMin,grade_c_min:gradeCMin,grade_d_min:gradeDMin}).eq('id',currentSchoolId).select('id,grade_a_min,grade_b_min,grade_c_min,grade_d_min').maybeSingle();
+ if(error)return alert('Could not save school profile: '+error.message);
+ if(!savedSchool)return alert('The school profile was not updated. No matching school record was returned. Please check your School Admin link and Supabase UPDATE/SELECT permissions. No success message was issued.');
+ const savedGrades=[savedSchool.grade_a_min,savedSchool.grade_b_min,savedSchool.grade_c_min,savedSchool.grade_d_min].map(Number);
+ if(savedGrades.some((v,i)=>v!==[gradeAMin,gradeBMin,gradeCMin,gradeDMin][i]))return alert('The database did not confirm the grading scale values. Please refresh and check the school record before continuing.');
  for(let i=1;i<=termCount;i++){
    const termName=`Term ${i}`, d=termDates[termName]||{};
    const {data:existing,error:findError}=await supabaseClient.from('academic_terms').select('id').eq('school_id',currentSchoolId).eq('academic_year',year).eq('term',termName).maybeSingle();
