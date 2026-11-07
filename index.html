@@ -454,6 +454,16 @@ function captureAssessmentPlanDraft(term){
  }
 }
 
+function syncCurrentTermFromAssessmentPlan(){
+ // Assessment Plan Term selects only which term's activities/deadlines are being edited.
+ // It must never change the school's Current Term.
+ refreshAssessmentPlanRows();
+}
+function syncAssessmentPlanTermFromCurrent(){
+ const selected=document.getElementById('pterm')?.value||data.school.term||'Term 1';
+ const plan=document.getElementById('assessmentPlanTerm'); if(plan)plan.value=selected;
+ refreshAssessmentPlanRows();
+}
 function refreshAssessmentPlanRows(){
  const term=document.getElementById('assessmentPlanTerm')?.value||data.school.term||'Term 1';
  captureAssessmentPlanDraft(term);
@@ -493,7 +503,7 @@ function profile(){
  <label>School Code<input id="pcode" value="${esc(data.school.code)}"></label>
  <label>Academic Year<input id="pyear" value="${esc(data.school.year)}"></label>
  <label>Number of Terms Used<select id="ptermCount" onchange="refreshProfileTermOptions()"><option value="1" ${data.school.termCount===1?'selected':''}>1 Term</option><option value="2" ${data.school.termCount===2?'selected':''}>2 Terms</option><option value="3" ${data.school.termCount===3?'selected':''}>3 Terms</option><option value="4" ${data.school.termCount===4?'selected':''}>4 Terms</option></select></label>
- <label>Current Term<select id="pterm">${terms.map(x=>`<option ${x===data.school.term?'selected':''}>${x}</option>`).join('')}</select></label>
+ <label>Current Term<select id="pterm" onchange="syncAssessmentPlanTermFromCurrent()">${terms.map(x=>`<option ${x===data.school.term?'selected':''}>${x}</option>`).join('')}</select></label>
  <label>School Logo<input id="plogo" type="file" accept="image/png,image/jpeg,image/webp" onchange="previewSchoolLogo(this)"></label>
  </div><h3 style="margin-top:18px">Term Dates</h3><p class="small">Set the official start and end dates for each term. These dates are used as the school's academic-term settings.</p>${dateRows}
  <div class="card" style="margin-top:14px;background:#f8fbfe">
@@ -516,7 +526,7 @@ function profile(){
  <div class="card" style="margin-top:14px;background:#f8fbfe">
    <h3 style="margin-top:0">Assessment Structure & Deadlines</h3>
    <p class="small">Set the number of activities, maximum mark for each activity, and the deadline for every task. Teachers will see the countdown and their punctuality status.</p>
-   <label>Assessment Plan Term<select id="assessmentPlanTerm" onchange="refreshAssessmentPlanRows()">${terms.map(x=>`<option ${x===planTerm?'selected':''}>${x}</option>`).join('')}</select></label>
+   <label>Assessment Plan Term<select id="assessmentPlanTerm" onchange="syncCurrentTermFromAssessmentPlan()">${terms.map(x=>`<option ${x===planTerm?'selected':''}>${x}</option>`).join('')}</select></label><p class="small">Choose the term whose assessment activities and deadlines you want to configure. This setting is independent of the school's Current Term.</p>
    <div style="margin-top:10px">${assessmentPlanEditor(planTerm)}</div>
  </div>
  <button onclick="saveProfile()">SAVE PROFILE</button></div>`;
@@ -539,11 +549,11 @@ async function saveProfile(){
  const code=document.getElementById('pcode').value.trim();
  const year=document.getElementById('pyear').value.trim()||data.school.year;
  const termCount=Number(document.getElementById('ptermCount').value||3);
- const term=document.getElementById('pterm').value;
+ const assessmentPlanTerm=document.getElementById('assessmentPlanTerm')?.value||profileAssessmentTerm||data.school.term||'Term 1';
+ const manuallySelectedCurrentTerm=document.getElementById('pterm')?.value||data.school.term||'Term 1';
  const assessmentMissingPolicy=document.getElementById('passessmentPolicy')?.value||data.school.assessmentMissingPolicy||'entered_only';
  const gradeAMin=Number(document.getElementById('gradeAMin')?.value??75), gradeBMin=Number(document.getElementById('gradeBMin')?.value??60), gradeCMin=Number(document.getElementById('gradeCMin')?.value??50), gradeDMin=Number(document.getElementById('gradeDMin')?.value??40);
  if([gradeAMin,gradeBMin,gradeCMin,gradeDMin].some(v=>!Number.isFinite(v)||v<0||v>100)||!(gradeAMin>gradeBMin&&gradeBMin>gradeCMin&&gradeCMin>gradeDMin))return alert('Grade thresholds must be between 0 and 100 and ordered A > B > C > D.');
- const assessmentPlanTerm=document.getElementById('assessmentPlanTerm')?.value||term;
  const file=document.getElementById('plogo')?.files?.[0];
  let logoUrl=data.school.logoUrl||null;
  if(file){
@@ -556,6 +566,8 @@ async function saveProfile(){
    termDates[key]={start:document.getElementById(`start_${suffix}`)?.value||'',end:document.getElementById(`end_${suffix}`)?.value||''};
    if(termDates[key].start && termDates[key].end && termDates[key].start>termDates[key].end)return alert(`${key}: Start Date cannot be after End Date.`);
  }
+ const dateRowsForResolution=Object.entries(termDates).map(([termName,d])=>({term:termName,start_date:d.start,end_date:d.end}));
+ const term=resolveSchoolCurrentTerm(dateRowsForResolution,manuallySelectedCurrentTerm);
  if(!currentSchoolId)return alert('Your login is not linked to a school. Please sign out and sign in again.');
  const {data:savedSchool,error}=await supabaseClient.from('schools').update({name,code,logo_url:logoUrl,term_count:termCount,assessment_missing_policy:assessmentMissingPolicy,grade_a_min:gradeAMin,grade_b_min:gradeBMin,grade_c_min:gradeCMin,grade_d_min:gradeDMin}).eq('id',currentSchoolId).select('id,grade_a_min,grade_b_min,grade_c_min,grade_d_min').maybeSingle();
  if(error)return alert('Could not save school profile: '+error.message);
@@ -595,7 +607,7 @@ async function saveProfile(){
  delete assessmentPlanDrafts[assessmentPlanTerm];
  data.school={...data.school,name,code,year,termCount,term,logoUrl,termDates,assessmentMissingPolicy,gradeAMin,gradeBMin,gradeCMin,gradeDMin};
  profileAssessmentTerm=assessmentPlanTerm;
- adminSelectedTerm=term; reportSelectedTerm=term;
+ adminSelectedTerm=term; reportSelectedTerm=term; teacherSelectedResultTerm=term;
  renderNav(); go('profile');
  alert('School profile, term dates, assessment structure and deadlines saved online.');
 }
@@ -1826,6 +1838,16 @@ async function dbRows(table, columns='*', schoolId=null) {
   return rows || [];
 }
 
+function localISODate(){const parts=new Intl.DateTimeFormat('en-CA',{timeZone:'Africa/Dar_es_Salaam',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date());const p=Object.fromEntries(parts.map(x=>[x.type,x.value]));return `${p.year}-${p.month}-${p.day}`;}
+function resolveSchoolCurrentTerm(terms, fallback='Term 1'){
+ const today=localISODate();
+ const dated=(terms||[]).filter(x=>x.start_date||x.end_date).sort((a,b)=>String(a.start_date||'').localeCompare(String(b.start_date||'')));
+ const active=dated.find(x=>(!x.start_date||x.start_date<=today)&&(!x.end_date||today<=x.end_date));
+ if(active?.term)return active.term;
+ const latestStarted=dated.filter(x=>x.start_date&&x.start_date<=today).sort((a,b)=>String(b.start_date).localeCompare(String(a.start_date)))[0];
+ if(latestStarted?.term && (!latestStarted.end_date||today<=latestStarted.end_date))return latestStarted.term;
+ return fallback||'Term 1';
+}
 async function loadOnlineData() {
   const {data: authData} = await supabaseClient.auth.getUser();
   currentUser = authData?.user || null;
@@ -1853,11 +1875,16 @@ async function loadOnlineData() {
   ]);
   const schools = schoolR;
   const school = schools[0] || {};
-  const term = termsR.find(x=>x.is_current) || termsR[0] || {};
   const configuredTermCount=Math.min(4,Math.max(1,Number(school.term_count||3)));
+  const academicYearRows=(termsR||[]).filter(x=>x.school_id===currentSchoolId && String(x.academic_year)===String(school.academic_year||new Date().getFullYear()));
+  const yearRows=academicYearRows.length?academicYearRows:(termsR||[]).filter(x=>x.school_id===currentSchoolId);
+  const fallbackTerm=(yearRows.find(x=>x.is_current)||yearRows[0]||{}).term||'Term 1';
+  const currentTermName=resolveSchoolCurrentTerm(yearRows,fallbackTerm);
+  const term=yearRows.find(x=>x.term===currentTermName)||yearRows.find(x=>x.is_current)||yearRows[0]||{};
   const termDates={};
-  (termsR||[]).filter(x=>x.school_id===currentSchoolId && String(x.academic_year)==String(term.academic_year||new Date().getFullYear())).forEach(x=>{termDates[x.term]={start:x.start_date||'',end:x.end_date||''};});
-  data.school = {name:school.name||'VAO Academy School', code:school.code||'', logoUrl:school.logo_url || ((school.name||'').trim()==='Tamani Foundation School' ? SCHOOL_LOGO : ''), termCount:configuredTermCount, year:term.academic_year||new Date().getFullYear().toString(), term:term.term||'Term 1', termDates, assessmentMissingPolicy:school.assessment_missing_policy||'entered_only', gradeAMin:Number(school.grade_a_min??75), gradeBMin:Number(school.grade_b_min??60), gradeCMin:Number(school.grade_c_min??50), gradeDMin:Number(school.grade_d_min??40), resultsPublished:school.results_published===true, resultsVisibleToTeachers:school.results_visible_to_teachers===true, resultsVisibleToParents:school.results_visible_to_parents===true};
+  (yearRows||[]).forEach(x=>{termDates[x.term]={start:x.start_date||'',end:x.end_date||''};});
+  data.school = {name:school.name||'VAO Academy School', code:school.code||'', logoUrl:school.logo_url || ((school.name||'').trim()==='Tamani Foundation School' ? SCHOOL_LOGO : ''), termCount:configuredTermCount, year:term.academic_year||new Date().getFullYear().toString(), term:currentTermName, termDates, assessmentMissingPolicy:school.assessment_missing_policy||'entered_only', gradeAMin:Number(school.grade_a_min??75), gradeBMin:Number(school.grade_b_min??60), gradeCMin:Number(school.grade_c_min??50), gradeDMin:Number(school.grade_d_min??40), resultsPublished:school.results_published===true, resultsVisibleToTeachers:school.results_visible_to_teachers===true, resultsVisibleToParents:school.results_visible_to_parents===true};
+  adminSelectedTerm=currentTermName; reportSelectedTerm=currentTermName; teacherSelectedResultTerm=currentTermName; profileAssessmentTerm=currentTermName;
   data.teachers = teachersR.map(t=>({
   id:t.id,name:t.name,email:t.email||'',user:t.email||'',user_id:t.user_id,loginUsername:t.login_username||'',status:t.status||'active',
   phone:t.phone||'',alternativePhone:t.alternative_phone||'',photoUrl:t.photo_url||'',gender:t.gender||'',dateOfBirth:t.date_of_birth||'',
