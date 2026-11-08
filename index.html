@@ -262,7 +262,7 @@ function assigned(t,subjectId,classId,term){return data.assignments.some(a=>a.te
 const adminPages=[
  ["dashboard","Dashboard"],["profile","School Profile"],["teachers","Teachers"],["students","Students"],["studentlist","Student Lists"],
  ["classes","Classes"],["subjects","Subjects"],["assignments","Teacher Assignments"],["timetable","Smart Timetable"],["classtimetable","Class Timetable"],
- ["attendance","Attendance Management"],["staffleave","Staff Leave & Permission"],["assessments","All Assessments"],["results","School Results"],["resultrelease","Results Release"],["reportcards","Report Cards"],["certificate","Final Certificate"],
+ ["attendance","Attendance Management"],["staffleave","Staff Leave & Permission"],["markmonitor","Teacher & Marks Monitoring"],["assessments","All Assessments"],["results","School Results"],["resultrelease","Results Release"],["reportcards","Report Cards"],["certificate","Final Certificate"],
  ["compare","Compare Results"],["jointexam","Joint Examination"],["backup","Backup / Restore"],["systemreset","System Data Reset"]
 ];
 const teacherPages=[
@@ -272,15 +272,18 @@ const teacherPages=[
 function openJointExam(){ window.open("VAO_Academy_JOINT_EXAM.html", "_blank"); }
 function renderNav(){
  // Explicitly keep Staff Leave & Permission in the admin menu only.
- const pages=(session.role==="admin"?adminPages:teacherPages).filter(([id])=>session.role==="admin" || id!=="staffleave");
+ const pages=(session.role==="admin"?(adminPreviewTeacherId?[...adminPages,...teacherPages]:adminPages):teacherPages).filter(([id])=>session.role==="admin" || id!=="staffleave");
  document.getElementById("nav").innerHTML=pages.map(([id,label])=>`<button id="nav_${id}" onclick="${id==="jointexam"?"openJointExam()":`go('${id}')`}">${label}</button>`).join("");
+ if(session.role==='admin' && adminPreviewTeacherId) document.getElementById('nav').innerHTML += `<button onclick="adminExitTeacher()" style="background:#9b2c2c;color:#fff">EXIT TEACHER VIEW</button>`;
  // Defensive cleanup in case any older/static copy of the button exists in the nav.
  if(session.role!=="admin") document.querySelectorAll('#nav button').forEach(b=>{if(b.textContent.trim()==="Staff Leave & Permission") b.remove();});
  document.getElementById("schoolTitle").textContent=data.school.name;
  document.getElementById("footerSchool").textContent=data.school.name;
- document.getElementById("userTitle").textContent=session.role==="admin"?"School Admin":"Teacher: "+me().name;
+ document.getElementById("userTitle").textContent=session.role==="admin"?(adminPreviewTeacherId?"School Admin · Viewing: "+(me()?.name||"Teacher"):"School Admin"):"Teacher: "+(me()?.name||"");
 }
 function go(id){
+ const adminOnlyPages=['dashboard','profile','teachers','students','studentlist','classes','subjects','assignments','timetable','classtimetable','attendance','staffleave','markmonitor','assessments','results','resultrelease','reportcards','certificate','compare','backup','systemreset','jointexam'];
+ if(session?.role!=='admin' && adminOnlyPages.includes(id)){ document.getElementById('main').innerHTML='<div class="notice">Access denied. This section is available to School Admin only.</div>'; return; }
  if(id!=='enter')stopTaskCountdown();
  active=id;
  document.querySelectorAll("nav button").forEach(b=>b.classList.remove("active"));
@@ -292,7 +295,7 @@ function go(id){
    return;
  }
  const pages={
- dashboard,profile,teachers,students,studentlist,classes,subjects,assignments,timetable,classtimetable,attendance,staffleave,myattendance,classattendance,assessments,results,resultrelease,reportcards,certificate,compare,backup,systemreset,
+ dashboard,profile,teachers,students,studentlist,classes,subjects,assignments,timetable,classtimetable,attendance,staffleave,markmonitor,myattendance,classattendance,assessments,results,resultrelease,reportcards,certificate,compare,backup,systemreset,
  tdashboard,mytimetable,tclasses,tsubjects,tstudents,enter,tresults,tprofile
  };
  document.getElementById("main").innerHTML=pages[id]();
@@ -302,6 +305,7 @@ function go(id){
  if(id==="attendance") {setTimeout(loadAttendanceRows,0);setTimeout(loadClassTeacherAssignments,0);setTimeout(loadPendingAttendanceApprovals,0);}
  if(id==="classattendance") setTimeout(loadTeacherClassAttendance,0);
  if(id==="staffleave") setTimeout(loadStaffLeaveRows,0);
+ if(id==="markmonitor") setTimeout(loadAdminMarkMonitor,0);
 }
 
 
@@ -1480,7 +1484,7 @@ function tdashboard(){
  const tasks=activeTaskSchedules(data.school.term||'Term 1');
  const submitted=(data.taskSubmissions||[]).filter(s=>s.teacherId===t.id).length;
  const dueSoon=tasks.filter(s=>s.dueAt && new Date(s.dueAt)>new Date()).length;
- return `<h2>Teacher Dashboard</h2><div class="grid">
+ return `<h2>Teacher Dashboard</h2>${session?.role==='admin'&&adminPreviewTeacherId?`<div class="notice" style="border:2px solid #d97706"><b>ADMIN ACCESS MODE</b> — You are viewing ${esc(t.name)}'s teacher workspace. Changes are performed using your School Admin account and are not a teacher login. <button class="secondary" onclick="adminExitTeacher()">EXIT TEACHER VIEW</button></div>`:''}<div class="grid">
  <div class="stat">My Subjects<strong>${new Set(aa.map(a=>a.subjectId)).size}</strong></div>
  <div class="stat">My Classes<strong>${new Set(aa.map(a=>a.classId)).size}</strong></div>
  <div class="stat">My Students<strong>${data.students.filter(s=>aa.some(a=>a.classId===s.classId)).length}</strong></div>
@@ -2103,7 +2107,28 @@ async function login(){
   finally{btn.disabled=false;btn.textContent='LOGIN';}
 }
 async function logout(){ await supabaseClient.auth.signOut(); location.reload(); }
-function me(){ return data.teachers.find(t=>t.id===session?.teacherId) || data.teachers.find(t=>t.email===session?.user); }
+// School Admin's temporary, read/write teacher workspace. This does NOT impersonate or replace the Auth user.
+let adminPreviewTeacherId = null;
+function me(){
+ if(session?.role==='admin' && adminPreviewTeacherId){
+   return data.teachers.find(t=>String(t.id)===String(adminPreviewTeacherId)) || null;
+ }
+ return data.teachers.find(t=>t.id===session?.teacherId) || data.teachers.find(t=>t.email===session?.user) || null;
+}
+function adminAccessTeacher(id){
+ if(session?.role!=='admin')return alert('Only School Admin can access a teacher workspace.');
+ const teacher=data.teachers.find(t=>String(t.id)===String(id));
+ if(!teacher)return alert('Teacher not found in this school.');
+ adminPreviewTeacherId=teacher.id;
+ renderNav();
+ go('tdashboard');
+}
+function adminExitTeacher(){
+ if(session?.role!=='admin')return;
+ adminPreviewTeacherId=null;
+ renderNav();
+ go('teachers');
+}
 function save(){ /* Online version: Supabase is the source of truth. */ }
 
 async function downloadStudentRegistrationTemplate(){
@@ -2301,6 +2326,78 @@ function teacherLoginButton(t){
   return `<button onclick="createTeacherLogin('${t.id}',false)">CREATE LOGIN</button>`;
 }
 
+// School Admin: teacher progress and missing assessment marks monitor.
+let adminMarkTerm='';
+let adminMarkTeacherFilter='all',adminMarkClassFilter='all',adminMarkSubjectFilter='all';
+function markMonitorTerm(){return adminMarkTerm||data.school.term||'Term 1';}
+function markMonitorRows(){
+ const term=markMonitorTerm();
+ const schedules=(data.assessmentSchedules||[]).filter(s=>s.term===term&&String(s.academicYear||data.school.year)===String(data.school.year)&&s.isActive);
+ const assignments=(data.assignments||[]).filter(a=>(a.term||'Term 1')===term);
+ const rows=[];
+ assignments.forEach(a=>{
+  const teacher=data.teachers.find(t=>String(t.id)===String(a.teacherId));
+  const subject=data.subjects.find(x=>String(x.id)===String(a.subjectId));
+  const cl=data.classes.find(x=>String(x.id)===String(a.classId));
+  const students=data.students.filter(x=>String(x.classId)===String(a.classId));
+  schedules.forEach(sch=>{
+   const scores=(data.taskScores||[]).filter(x=>x.scheduleId===sch.id&&x.teacherId===a.teacherId&&x.subjectId===a.subjectId&&x.classId===a.classId);
+   const entered=students.filter(st=>scores.some(sc=>String(sc.studentId)===String(st.id))).length;
+   rows.push({a,teacher,subject,cl,students,sch,entered,total:students.length,pending:Math.max(0,students.length-entered)});
+  });
+ });
+ return rows;
+}
+function markMonitorOptions(items,selected,allLabel){return `<option value="all">${allLabel}</option>`+items.map(x=>`<option value="${esc(x.id)}" ${String(selected)===String(x.id)?'selected':''}>${esc(x.name)}</option>`).join('');}
+function markmonitor(){
+ const term=markMonitorTerm();
+ const rows=markMonitorRows();
+ const teacherFilter=adminMarkTeacherFilter;
+ const classFilter=adminMarkClassFilter;
+ const subjectFilter=adminMarkSubjectFilter;
+ const filtered=rows.filter(r=>(teacherFilter==='all'||String(r.a.teacherId)===teacherFilter)&&(classFilter==='all'||String(r.a.classId)===classFilter)&&(subjectFilter==='all'||String(r.a.subjectId)===subjectFilter));
+ const total=filtered.reduce((n,r)=>n+r.total,0),entered=filtered.reduce((n,r)=>n+r.entered,0),pending=Math.max(0,total-entered),pct=total?Math.round(entered/total*100):0;
+ return `<h2>Teacher & Marks Monitoring</h2><p class="notice">Monitor marks for this school only. A mark is counted as entered when a saved score exists for the student and scheduled activity.</p>
+ <div class="formgrid"><label>Term<select id="mmTerm" onchange="adminMarkTerm=this.value;go('markmonitor')">${termOptions(term)}</select></label>
+ <label>Teacher<select id="mmTeacher" onchange="adminMarkTeacherFilter=this.value;go('markmonitor')">${markMonitorOptions(data.teachers,teacherFilter,'All Teachers')}</select></label>
+ <label>Class<select id="mmClass" onchange="adminMarkClassFilter=this.value;go('markmonitor')">${markMonitorOptions(data.classes.map(c=>({id:c.id,name:cls(c.id)})),classFilter,'All Classes')}</select></label>
+ <label>Subject<select id="mmSubject" onchange="adminMarkSubjectFilter=this.value;go('markmonitor')">${markMonitorOptions(data.subjects,subjectFilter,'All Subjects')}</select></label></div>
+ <div class="grid"><div class="stat">Expected Marks<strong>${total}</strong></div><div class="stat">Entered<strong>${entered}</strong></div><div class="stat">Pending<strong>${pending}</strong></div><div class="stat">Completion<strong>${pct}%</strong></div></div>
+ <div class="card"><h3>Assessment completion by teacher</h3>${filtered.length?`<div class="table-wrap" style="overflow-x:auto"><table><thead><tr><th>Teacher</th><th>Class</th><th>Subject</th><th>Assessment</th><th>Entered</th><th>Pending</th><th>Progress</th><th>Action</th></tr></thead><tbody>${filtered.map(r=>{const label=(r.sch.activityType==='exam'?'Exam / Summative':r.sch.activityType==='assignment'?'Assignment / Project':r.sch.activityType[0].toUpperCase()+r.sch.activityType.slice(1))+' '+r.sch.activityNumber;return `<tr><td>${esc(r.teacher?.name||'Teacher')}</td><td>${esc(r.cl?cls(r.cl.id):'Class')}</td><td>${esc(r.subject?.name||'Subject')}</td><td>${esc(label)}</td><td>${r.entered}/${r.total}</td><td><b style="color:${r.pending?'#b45309':'#15803d'}">${r.pending}</b></td><td>${r.total?Math.round(r.entered/r.total*100):0}%</td><td><button onclick="adminOpenTask('${r.sch.id}','${r.a.teacherId}','${r.a.subjectId}','${r.a.classId}')">VIEW / EDIT</button></td></tr>`}).join('')}</tbody></table></div>`:'<p>No teacher assignments or active assessment schedules found for this term.</p>'}</div><div id="adminMarkEditor"></div>`;
+}
+async function loadAdminMarkMonitor(){
+ if(session?.role!=='admin')return;
+ const host=document.getElementById('adminMarkEditor');if(host)host.innerHTML='';
+}
+function adminOpenTask(scheduleId,teacherId,subjectId,classId){
+ if(session?.role!=='admin')return alert('Only School Admin can edit marks here.');
+ const host=document.getElementById('adminMarkEditor');if(!host)return;
+ const sch=data.assessmentSchedules.find(x=>x.id===scheduleId);if(!sch)return alert('Assessment schedule not found.');
+ const students=data.students.filter(x=>String(x.classId)===String(classId));
+ const existing=(data.taskScores||[]).filter(x=>x.scheduleId===scheduleId&&x.teacherId===teacherId&&x.subjectId===subjectId&&x.classId===classId);
+ const teacher=data.teachers.find(x=>String(x.id)===String(teacherId)),subject=data.subjects.find(x=>String(x.id)===String(subjectId));
+ const label=(sch.activityType==='exam'?'Exam / Summative':sch.activityType==='assignment'?'Assignment / Project':sch.activityType[0].toUpperCase()+sch.activityType.slice(1))+' '+sch.activityNumber;
+ host.innerHTML=`<div class="card" style="margin-top:18px" id="adminMarkEditorCard"><h3>Admin mark entry: ${esc(teacher?.name||'Teacher')} — ${esc(subject?.name||'Subject')} — ${esc(label)}</h3><p class="small">Enter missing marks or correct existing marks. Maximum: ${sch.maxMark}. Blank cells are left unchanged.</p><div style="overflow-x:auto"><table><thead><tr><th>Admission No.</th><th>Student</th><th>Mark / ${sch.maxMark}</th><th>Status</th></tr></thead><tbody>${students.map(st=>{const score=existing.find(x=>String(x.studentId)===String(st.id));return `<tr><td>${esc(st.admission||'')}</td><td>${esc(st.name)}</td><td><input style="max-width:130px" type="number" min="0" max="${sch.maxMark}" step="0.01" id="admin_mark_${st.id}" value="${score?score.mark:''}" placeholder="Enter mark"></td><td>${score?'Entered':'<span style="color:#b45309">Missing</span>'}</td></tr>`}).join('')}</tbody></table></div><button onclick="adminSaveTaskScores('${scheduleId}','${teacherId}','${subjectId}','${classId}')">SAVE MARKS & UPDATE RESULTS</button> <button class="secondary" onclick="document.getElementById('adminMarkEditor').innerHTML=''">CLOSE</button><p class="small" id="adminMarkSaveStatus"></p></div>`;
+ host.scrollIntoView({behavior:'smooth',block:'start'});
+}
+async function adminSaveTaskScores(scheduleId,teacherId,subjectId,classId){
+ if(session?.role!=='admin')return alert('Only School Admin can edit marks here.');
+ const sch=data.assessmentSchedules.find(x=>x.id===scheduleId);if(!sch)return alert('Assessment schedule not found.');
+ const students=data.students.filter(x=>String(x.classId)===String(classId));const entered=[];
+ for(const st of students){const el=document.getElementById(`admin_mark_${st.id}`);const raw=el?.value??'';if(raw==='')continue;const mark=Number(raw);if(!Number.isFinite(mark)||mark<0||mark>Number(sch.maxMark))return alert(`${st.name}: enter a mark from 0 to ${sch.maxMark}.`);entered.push({student:st,mark});}
+ if(!entered.length)return alert('No marks entered or changed.');
+ const status=document.getElementById('adminMarkSaveStatus');if(status)status.textContent='Saving marks…';
+ try{
+  let sub=(data.taskSubmissions||[]).find(x=>x.scheduleId===scheduleId&&x.teacherId===teacherId&&x.subjectId===subjectId&&x.classId===classId);
+  let subId=sub?.id;
+  if(!subId){const payload={school_id:currentSchoolId,schedule_id:scheduleId,teacher_id:teacherId,subject_id:subjectId,class_id:classId,submitted_at:new Date().toISOString(),source:'admin',due_at:sch.dueAt||null};const {data:created,error}=await supabaseClient.from('assessment_task_submissions').upsert(payload,{onConflict:'school_id,schedule_id,teacher_id,subject_id,class_id'}).select('*').single();if(error)throw error;subId=created.id;}
+  const rows=entered.map(x=>({school_id:currentSchoolId,submission_id:subId,schedule_id:scheduleId,teacher_id:teacherId,student_id:x.student.id,subject_id:subjectId,class_id:classId,mark:x.mark}));
+  const {error:scoreError}=await supabaseClient.from('assessment_task_scores').upsert(rows,{onConflict:'submission_id,student_id'});if(scoreError)throw scoreError;
+  const {error:rpcError}=await supabaseClient.rpc('rebuild_assessment_for_context',{p_school_id:currentSchoolId,p_teacher_id:teacherId,p_subject_id:subjectId,p_class_id:classId,p_term:sch.term,p_academic_year:data.school.year});if(rpcError)throw rpcError;
+  await loadOnlineData();alert(`Saved ${entered.length} marks and recalculated results.`);go('markmonitor');
+ }catch(e){if(status)status.textContent='Save failed: '+(e.message||'Unknown error');alert('Could not save marks. Check Supabase permissions/RLS: '+(e.message||''));}
+}
+
 function teachers(){
  return `<h2>Teachers</h2>
  <div class="notice">Add a teacher once and VAO Academy will create the teacher's login account through Supabase. The teacher receives a unique <b>username + temporary password</b>. Admin can later reset the login. Self-edit remains controlled separately by <b>ALLOW SELF-EDIT</b>.</div>
@@ -2338,7 +2435,7 @@ function teachers(){
   t.loginUsername?`<b>${esc(t.loginUsername)}</b>`:'Not created',
   punctualitySummary(t.id).label,
   data.assignments.filter(a=>a.teacherId===t.id).length,
-  `${teacherLoginButton(t)} <button onclick="viewTeacherProfile('${t.id}')">VIEW / EDIT</button> <button onclick="toggleTeacherSelfEdit('${t.id}',${t.profileSelfEditEnabled?'false':'true'})">${t.profileSelfEditEnabled?'DISABLE SELF-EDIT':'ALLOW SELF-EDIT'}</button> <button class="danger" onclick="deleteTeacher('${t.id}')">DELETE</button>`
+  `${teacherLoginButton(t)} ${session?.role==='admin'?`<button onclick="adminAccessTeacher('${t.id}')">ACCESS TEACHER DASHBOARD</button>`:''} <button onclick="viewTeacherProfile('${t.id}')">VIEW / EDIT</button> <button onclick="toggleTeacherSelfEdit('${t.id}',${t.profileSelfEditEnabled?'false':'true'})">${t.profileSelfEditEnabled?'DISABLE SELF-EDIT':'ALLOW SELF-EDIT'}</button> <button class="danger" onclick="deleteTeacher('${t.id}')">DELETE</button>`
  ]))}`;
 }
 
