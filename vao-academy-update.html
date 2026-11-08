@@ -448,7 +448,7 @@ function captureAssessmentPlanDraft(term){
    for(let n=1;n<=count;n++){
      const due=document.getElementById(`due_${meta.type}_${n}`)?.value||'';
      const existing=savedRows.find(x=>x.activityNumber===n);
-     rows.push({activityNumber:n,dueAt:due ? new Date(due).toISOString() : (existing?.dueAt||null)});
+     rows.push({activityNumber:n,weight:meta.type==='exam'?Number(document.getElementById(`exam_weight_${n}`)?.value??existing?.examWeight??(Number(data.school.summativeWeight??60)/Math.max(count,1))):null,dueAt:due ? new Date(due).toISOString() : (existing?.dueAt||null)});
    }
    assessmentPlanDrafts[term][meta.type]={count,max,rows};
  }
@@ -476,7 +476,7 @@ function assessmentPlanEditor(term){
    const inputCount=`plan_${meta.type}_count`, inputMax=`plan_${meta.type}_max`;
    const rows=Array.from({length:cfg.count},(_,i)=>{
       const n=i+1, existing=cfg.rows.find(x=>x.activityNumber===n);
-      return `<tr><td>${meta.label} ${n}</td><td>${meta.weight}</td><td>${cfg.max}</td><td><input id="due_${meta.type}_${n}" type="datetime-local" value="${localDateTimeValue(existing?.dueAt)}"></td></tr>`;
+      return `<tr><td>${meta.label} ${n}</td><td>${meta.type==='exam'?`<input type="number" id="exam_weight_${n}" min="0" max="100" step="0.01" value="${Number(existing?.weight??existing?.examWeight??(Number(data.school.summativeWeight??60)/Math.max(cfg.count,1)))}">`:meta.weight} </td><td>${cfg.max}</td><td><input id="due_${meta.type}_${n}" type="datetime-local" value="${localDateTimeValue(existing?.dueAt)}"></td></tr>`;
    }).join('') || `<tr><td colspan="4" class="small">No activities configured.</td></tr>`;
    return `<div class="card" style="margin:10px 0;background:#f8fbfe">
       <h3 style="margin-top:0">${meta.label}</h3>
@@ -485,6 +485,7 @@ function assessmentPlanEditor(term){
         <label>Maximum mark per activity<input id="${inputMax}" type="number" min="0.5" max="100" step="0.5" value="${cfg.max}"></label>
       </div>
       <button type="button" class="secondary" onclick="refreshAssessmentPlanRows()">UPDATE ${meta.label.toUpperCase()} ACTIVITIES</button>
+      ${meta.type==='exam'?`<button type="button" class="secondary" onclick="document.querySelectorAll('[id^=exam_weight_]').forEach(el=>el.value=(Number(document.getElementById('summativeWeight')?.value??60)/Math.max(1,document.querySelectorAll('[id^=exam_weight_]').length)).toFixed(2))">EQUAL WEIGHT</button><p class="small">Set each exam weight for Custom Weight; their sum must equal the Summative contribution.</p>`:''}
       <p class="small">Set any number from 0 to 100. Change the number, then click UPDATE ACTIVITIES. The rows will immediately increase or decrease to match your number. This category contributes up to ${meta.weight} marks to the final 100.</p>
       <div style="overflow:auto"><table><thead><tr><th>Activity</th><th>Weight</th><th>Max Mark</th><th>Deadline (date & time)</th></tr></thead><tbody>${rows}</tbody></table></div>
    </div>`;
@@ -507,7 +508,10 @@ function profile(){
  <label>School Logo<input id="plogo" type="file" accept="image/png,image/jpeg,image/webp" onchange="previewSchoolLogo(this)"></label>
  </div><h3 style="margin-top:18px">Term Dates</h3><p class="small">Set the official start and end dates for each term. These dates are used as the school's academic-term settings.</p>${dateRows}
  <div class="card" style="margin-top:14px;background:#f8fbfe">
-   <h3 style="margin-top:0">Assessment Calculation Policy</h3>
+   <h3>Assessment Contributions</h3><div class="formgrid">
+   <label>Formative (%)<input id="formativeWeight" type="number" min="0" max="100" step="1" value="${Number(data.school.formativeWeight??40)}"></label>
+   <label>Summative (%)<input id="summativeWeight" type="number" min="0" max="100" step="1" value="${Number(data.school.summativeWeight??60)}"></label>
+   </div><p class="small">Formative + Summative must equal 100. Saving a plan does not erase previously entered marks.</p><h3 style="margin-top:0">Assessment Calculation Policy</h3>
    <p class="small">Choose how missing activities are treated. Coursework contributes 40 marks (10 Classwork + 10 Homework + 10 Quiz + 10 Assignment/Project) and Exam/Summative contributes 60 marks.</p>
    <label>Calculation Policy
      <select id="passessmentPolicy"><option value="entered_only" ${(data.school.assessmentMissingPolicy||'entered_only')==='entered_only'?'selected':''}>Average of Entered Activities</option><option value="missing_zero" ${(data.school.assessmentMissingPolicy||'entered_only')==='missing_zero'?'selected':''}>All Activities Count — Missing = 0</option></select>
@@ -552,6 +556,9 @@ async function saveProfile(){
  const assessmentPlanTerm=document.getElementById('assessmentPlanTerm')?.value||profileAssessmentTerm||data.school.term||'Term 1';
  const manuallySelectedCurrentTerm=document.getElementById('pterm')?.value||data.school.term||'Term 1';
  const assessmentMissingPolicy=document.getElementById('passessmentPolicy')?.value||data.school.assessmentMissingPolicy||'entered_only';
+ const formativeWeight=Number(document.getElementById('formativeWeight')?.value??40);
+ const summativeWeight=Number(document.getElementById('summativeWeight')?.value??60);
+ if(!Number.isFinite(formativeWeight)||!Number.isFinite(summativeWeight)||formativeWeight<0||summativeWeight<0||formativeWeight+summativeWeight!==100)return alert('Formative and Summative must add up to 100.');
  const gradeAMin=Number(document.getElementById('gradeAMin')?.value??75), gradeBMin=Number(document.getElementById('gradeBMin')?.value??60), gradeCMin=Number(document.getElementById('gradeCMin')?.value??50), gradeDMin=Number(document.getElementById('gradeDMin')?.value??40);
  if([gradeAMin,gradeBMin,gradeCMin,gradeDMin].some(v=>!Number.isFinite(v)||v<0||v>100)||!(gradeAMin>gradeBMin&&gradeBMin>gradeCMin&&gradeCMin>gradeDMin))return alert('Grade thresholds must be between 0 and 100 and ordered A > B > C > D.');
  const file=document.getElementById('plogo')?.files?.[0];
@@ -569,7 +576,7 @@ async function saveProfile(){
  const dateRowsForResolution=Object.entries(termDates).map(([termName,d])=>({term:termName,start_date:d.start,end_date:d.end}));
  const term=resolveSchoolCurrentTerm(dateRowsForResolution,manuallySelectedCurrentTerm);
  if(!currentSchoolId)return alert('Your login is not linked to a school. Please sign out and sign in again.');
- const {data:savedSchool,error}=await supabaseClient.from('schools').update({name,code,logo_url:logoUrl,term_count:termCount,assessment_missing_policy:assessmentMissingPolicy,grade_a_min:gradeAMin,grade_b_min:gradeBMin,grade_c_min:gradeCMin,grade_d_min:gradeDMin}).eq('id',currentSchoolId).select('id,grade_a_min,grade_b_min,grade_c_min,grade_d_min').maybeSingle();
+ const {data:savedSchool,error}=await supabaseClient.from('schools').update({name,code,logo_url:logoUrl,term_count:termCount,assessment_missing_policy:assessmentMissingPolicy,formative_weight:formativeWeight,summative_weight:summativeWeight,grade_a_min:gradeAMin,grade_b_min:gradeBMin,grade_c_min:gradeCMin,grade_d_min:gradeDMin}).eq('id',currentSchoolId).select('id,grade_a_min,grade_b_min,grade_c_min,grade_d_min').maybeSingle();
  if(error)return alert('Could not save school profile: '+error.message);
  if(!savedSchool)return alert('The school profile was not updated. No matching school record was returned. Please check your School Admin link and Supabase UPDATE/SELECT permissions. No success message was issued.');
  const savedGrades=[savedSchool.grade_a_min,savedSchool.grade_b_min,savedSchool.grade_c_min,savedSchool.grade_d_min].map(Number);
@@ -592,11 +599,16 @@ async function saveProfile(){
    const count=Math.max(0,Math.min(100,Number(draft.count||0)));
    const maxMark=Math.max(0.5,Math.min(100,Number(draft.max||meta.defaultMax)));
    const draftRows=Array.isArray(draft.rows)?draft.rows:[];
+   if(meta.type==='exam' && count>0){
+     const total=Array.from({length:count},(_,i)=>Number(draftRows.find(x=>x.activityNumber===i+1)?.weight??(summativeWeight/count))).reduce((a,b)=>a+b,0);
+     if(!Number.isFinite(total)||Math.abs(total-summativeWeight)>0.011)return alert(`Exam weights must total ${summativeWeight}. Current total: ${total.toFixed(2)}.`);
+   }
    for(let n=1;n<=count;n++){
      const row=draftRows.find(x=>x.activityNumber===n);
      const dueAt=row?.dueAt||null;
      if(dueAt && Number.isNaN(new Date(dueAt).getTime()))return alert(`${meta.label} ${n}: invalid deadline.`);
      const payload={school_id:currentSchoolId,academic_year:year,term:assessmentPlanTerm,activity_type:meta.type,activity_number:n,max_mark:maxMark,due_at:dueAt,is_active:true};
+     if(meta.type==='exam')payload.exam_weight=Number(row?.weight??(summativeWeight/Math.max(count,1)));
      const {error:scheduleError}=await supabaseClient.from('assessment_schedules').upsert(payload,{onConflict:'school_id,academic_year,term,activity_type,activity_number'});
      if(scheduleError)return alert(scheduleError.message);
    }
@@ -605,7 +617,7 @@ async function saveProfile(){
  }
  await loadOnlineData();
  delete assessmentPlanDrafts[assessmentPlanTerm];
- data.school={...data.school,name,code,year,termCount,term,logoUrl,termDates,assessmentMissingPolicy,gradeAMin,gradeBMin,gradeCMin,gradeDMin};
+ data.school={...data.school,name,code,year,termCount,term,logoUrl,termDates,assessmentMissingPolicy,formativeWeight,summativeWeight,gradeAMin,gradeBMin,gradeCMin,gradeDMin};
  profileAssessmentTerm=assessmentPlanTerm;
  adminSelectedTerm=term; reportSelectedTerm=term; teacherSelectedResultTerm=term;
  renderNav(); go('profile');
@@ -1883,7 +1895,7 @@ async function loadOnlineData() {
   const term=yearRows.find(x=>x.term===currentTermName)||yearRows.find(x=>x.is_current)||yearRows[0]||{};
   const termDates={};
   (yearRows||[]).forEach(x=>{termDates[x.term]={start:x.start_date||'',end:x.end_date||''};});
-  data.school = {name:school.name||'VAO Academy School', code:school.code||'', logoUrl:school.logo_url || ((school.name||'').trim()==='Tamani Foundation School' ? SCHOOL_LOGO : ''), termCount:configuredTermCount, year:term.academic_year||new Date().getFullYear().toString(), term:currentTermName, termDates, assessmentMissingPolicy:school.assessment_missing_policy||'entered_only', gradeAMin:Number(school.grade_a_min??75), gradeBMin:Number(school.grade_b_min??60), gradeCMin:Number(school.grade_c_min??50), gradeDMin:Number(school.grade_d_min??40), resultsPublished:school.results_published===true, resultsVisibleToTeachers:school.results_visible_to_teachers===true, resultsVisibleToParents:school.results_visible_to_parents===true};
+  data.school = {name:school.name||'VAO Academy School', code:school.code||'', logoUrl:school.logo_url || ((school.name||'').trim()==='Tamani Foundation School' ? SCHOOL_LOGO : ''), termCount:configuredTermCount, year:term.academic_year||new Date().getFullYear().toString(), term:currentTermName, termDates, assessmentMissingPolicy:school.assessment_missing_policy||'entered_only', formativeWeight:Number(school.formative_weight??40), summativeWeight:Number(school.summative_weight??60), gradeAMin:Number(school.grade_a_min??75), gradeBMin:Number(school.grade_b_min??60), gradeCMin:Number(school.grade_c_min??50), gradeDMin:Number(school.grade_d_min??40), resultsPublished:school.results_published===true, resultsVisibleToTeachers:school.results_visible_to_teachers===true, resultsVisibleToParents:school.results_visible_to_parents===true};
   adminSelectedTerm=currentTermName; reportSelectedTerm=currentTermName; teacherSelectedResultTerm=currentTermName; profileAssessmentTerm=currentTermName;
   data.teachers = teachersR.map(t=>({
   id:t.id,name:t.name,email:t.email||'',user:t.email||'',user_id:t.user_id,loginUsername:t.login_username||'',status:t.status||'active',
@@ -1913,7 +1925,7 @@ async function loadOnlineData() {
       classwork:Number(a.classwork||0),homework:Number(a.homework||0),quiz:Number(a.quiz_test||0),assignment:Number(a.assignment||0),
       formative:Number(a.formative||0),summative:Number(a.summative||0),final,grade:grade(final),remark:remark(final)};
   });
-  data.assessmentSchedules=(schedulesR||[]).map(x=>({id:x.id,schoolId:x.school_id,academicYear:x.academic_year,term:x.term,activityType:x.activity_type,activityNumber:Number(x.activity_number),maxMark:Number(x.max_mark||0),dueAt:x.due_at||null,isActive:x.is_active!==false}));
+  data.assessmentSchedules=(schedulesR||[]).map(x=>({id:x.id,schoolId:x.school_id,academicYear:x.academic_year,term:x.term,activityType:x.activity_type,activityNumber:Number(x.activity_number),examWeight:x.exam_weight==null?null:Number(x.exam_weight),maxMark:Number(x.max_mark||0),dueAt:x.due_at||null,isActive:x.is_active!==false}));
   data.taskSubmissions=(submissionsR||[]).map(x=>({id:x.id,schoolId:x.school_id,scheduleId:x.schedule_id,teacherId:x.teacher_id,subjectId:x.subject_id,classId:x.class_id,submittedAt:x.submitted_at,source:x.source||'manual',dueAt:x.due_at||null}));
   data.taskScores=(scoresR||[]).map(x=>({id:x.id,schoolId:x.school_id,submissionId:x.submission_id,scheduleId:x.schedule_id,teacherId:x.teacher_id,studentId:x.student_id,subjectId:x.subject_id,classId:x.class_id,mark:Number(x.mark||0)}));
   // Defensive client-side integrity check: no loaded row may belong to another school.
