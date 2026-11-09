@@ -282,8 +282,6 @@ function renderNav(){
  document.getElementById("userTitle").textContent=session.role==="admin"?(adminPreviewTeacherId?"School Admin · Viewing: "+(me()?.name||"Teacher"):"School Admin"):"Teacher: "+(me()?.name||"");
 }
 function go(id){
- const adminOnlyPages=['dashboard','profile','teachers','students','studentlist','classes','subjects','assignments','timetable','classtimetable','attendance','staffleave','markmonitor','assessments','results','resultrelease','reportcards','certificate','compare','backup','systemreset','jointexam'];
- if(session?.role!=='admin' && adminOnlyPages.includes(id)){ document.getElementById('main').innerHTML='<div class="notice">Access denied. This section is available to School Admin only.</div>'; return; }
  if(id!=='enter')stopTaskCountdown();
  active=id;
  document.querySelectorAll("nav button").forEach(b=>b.classList.remove("active"));
@@ -423,7 +421,7 @@ function scheduleRowsForTerm(term,type){
 function schedulePlanDefaults(term,type){
  const meta=ASSESSMENT_META.find(x=>x.type===type);
  const savedRows=scheduleRowsForTerm(term,type);
- const savedCount=savedRows.length || meta.defaultCount;
+ const savedCount=savedRows.length ? Math.max(...savedRows.map(r=>Number(r.activityNumber)||0)) : meta.defaultCount;
  const savedMax=savedRows.length ? Number(savedRows[0].maxMark||meta.defaultMax) : meta.defaultMax;
  const draft=assessmentPlanDrafts?.[term]?.[type];
  return draft ? {
@@ -578,9 +576,9 @@ async function saveProfile(){
    if(termDates[key].start && termDates[key].end && termDates[key].start>termDates[key].end)return alert(`${key}: Start Date cannot be after End Date.`);
  }
  const dateRowsForResolution=Object.entries(termDates).map(([termName,d])=>({term:termName,start_date:d.start,end_date:d.end}));
- const term=resolveSchoolCurrentTerm(dateRowsForResolution,manuallySelectedCurrentTerm);
+ const term=manuallySelectedCurrentTerm;
  if(!currentSchoolId)return alert('Your login is not linked to a school. Please sign out and sign in again.');
- const {data:savedSchool,error}=await supabaseClient.from('schools').update({name,code,logo_url:logoUrl,term_count:termCount,assessment_missing_policy:assessmentMissingPolicy,formative_weight:formativeWeight,summative_weight:summativeWeight,grade_a_min:gradeAMin,grade_b_min:gradeBMin,grade_c_min:gradeCMin,grade_d_min:gradeDMin}).eq('id',currentSchoolId).select('id,grade_a_min,grade_b_min,grade_c_min,grade_d_min').maybeSingle();
+ const {data:savedSchool,error}=await supabaseClient.from('schools').update({name,code,academic_year:year,logo_url:logoUrl,term_count:termCount,assessment_missing_policy:assessmentMissingPolicy,formative_weight:formativeWeight,summative_weight:summativeWeight,grade_a_min:gradeAMin,grade_b_min:gradeBMin,grade_c_min:gradeCMin,grade_d_min:gradeDMin}).eq('id',currentSchoolId).select('id,grade_a_min,grade_b_min,grade_c_min,grade_d_min').maybeSingle();
  if(error)return alert('Could not save school profile: '+error.message);
  if(!savedSchool)return alert('The school profile was not updated. No matching school record was returned. Please check your School Admin link and Supabase UPDATE/SELECT permissions. No success message was issued.');
  const savedGrades=[savedSchool.grade_a_min,savedSchool.grade_b_min,savedSchool.grade_c_min,savedSchool.grade_d_min].map(Number);
@@ -618,6 +616,10 @@ async function saveProfile(){
    }
    const {error:deactivateError}=await supabaseClient.from('assessment_schedules').update({is_active:false}).eq('school_id',currentSchoolId).eq('academic_year',year).eq('term',assessmentPlanTerm).eq('activity_type',meta.type).gt('activity_number',count);
    if(deactivateError)return alert(deactivateError.message);
+   const {data:verifiedRows,error:verifyError}=await supabaseClient.from('assessment_schedules').select('activity_number').eq('school_id',currentSchoolId).eq('academic_year',year).eq('term',assessmentPlanTerm).eq('activity_type',meta.type).eq('is_active',true);
+   if(verifyError)return alert('Could not verify saved '+meta.label+' activities: '+verifyError.message);
+   const verifiedCount=(verifiedRows||[]).reduce((max,row)=>Math.max(max,Number(row.activity_number)||0),0);
+   if(verifiedCount!==count)return alert(`${meta.label}: You requested ${count} activities, but the database confirmed ${verifiedCount}. Please check permissions and try again.`);
  }
  await loadOnlineData();
  delete assessmentPlanDrafts[assessmentPlanTerm];
@@ -1914,7 +1916,7 @@ async function loadOnlineData() {
   const academicYearRows=(termsR||[]).filter(x=>x.school_id===currentSchoolId && String(x.academic_year)===String(school.academic_year||new Date().getFullYear()));
   const yearRows=academicYearRows.length?academicYearRows:(termsR||[]).filter(x=>x.school_id===currentSchoolId);
   const fallbackTerm=(yearRows.find(x=>x.is_current)||yearRows[0]||{}).term||'Term 1';
-  const currentTermName=resolveSchoolCurrentTerm(yearRows,fallbackTerm);
+  const currentTermName=(yearRows.find(x=>x.is_current)||{}).term||resolveSchoolCurrentTerm(yearRows,fallbackTerm);
   const term=yearRows.find(x=>x.term===currentTermName)||yearRows.find(x=>x.is_current)||yearRows[0]||{};
   const termDates={};
   (yearRows||[]).forEach(x=>{termDates[x.term]={start:x.start_date||'',end:x.end_date||''};});
@@ -2435,7 +2437,7 @@ function teachers(){
   t.loginUsername?`<b>${esc(t.loginUsername)}</b>`:'Not created',
   punctualitySummary(t.id).label,
   data.assignments.filter(a=>a.teacherId===t.id).length,
-  `${teacherLoginButton(t)} ${session?.role==='admin'?`<button onclick="adminAccessTeacher('${t.id}')">ACCESS TEACHER DASHBOARD</button>`:''} <button onclick="viewTeacherProfile('${t.id}')">VIEW / EDIT</button> <button onclick="toggleTeacherSelfEdit('${t.id}',${t.profileSelfEditEnabled?'false':'true'})">${t.profileSelfEditEnabled?'DISABLE SELF-EDIT':'ALLOW SELF-EDIT'}</button> <button class="danger" onclick="deleteTeacher('${t.id}')">DELETE</button>`
+  `${teacherLoginButton(t)} <button onclick="adminAccessTeacher('${t.id}')">ACCESS TEACHER DASHBOARD</button> <button onclick="viewTeacherProfile('${t.id}')">VIEW / EDIT</button> <button onclick="toggleTeacherSelfEdit('${t.id}',${t.profileSelfEditEnabled?'false':'true'})">${t.profileSelfEditEnabled?'DISABLE SELF-EDIT':'ALLOW SELF-EDIT'}</button> <button class="danger" onclick="deleteTeacher('${t.id}')">DELETE</button>`
  ]))}`;
 }
 
