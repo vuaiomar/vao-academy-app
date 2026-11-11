@@ -1336,25 +1336,44 @@ function selectedReportStudent(){
  reportSelectedStudent=studentId;
  return student;
 }
+function reportCardSubjectRows(student, term){
+ const year=String(data.school?.year||'');
+ const assignedIds=[...new Set((data.assignments||[])
+   .filter(a=>String(a.classId)===String(student.classId) && (!a.term || a.term===term))
+   .map(a=>String(a.subjectId)).filter(Boolean))];
+ const subjectIds=assignedIds.length?assignedIds:[...new Set((data.assessments||[])
+   .filter(a=>String(a.studentId)===String(student.id) && String(a.classId||student.classId)===String(student.classId) && (a.term||'Term 1')===term && (!a.academicYear||String(a.academicYear)===year))
+   .map(a=>String(a.subjectId)).filter(Boolean))];
+ return subjectIds.map(subjectId=>{
+   const found=(data.assessments||[]).find(a=>String(a.studentId)===String(student.id) && String(a.subjectId)===subjectId && String(a.classId||student.classId)===String(student.classId) && (a.term||'Term 1')===term && (!a.academicYear||String(a.academicYear)===year));
+   const subject=byId(data.subjects,subjectId);
+   return found?{...found,subjectName:found.subjectName||subject?.name||'Subject',hasResult:found.final!==null&&found.final!==undefined&&found.final!==''}
+     :{subjectId,subjectName:subject?.name||'Subject',formative:null,summative:null,final:null,hasResult:false};
+ }).sort((a,b)=>(a.subjectName||'').localeCompare(b.subjectName||''));
+}
 function showReportCard(){
  const s=selectedReportStudent();if(!s)return;
  const term=document.getElementById('rcTerm').value;
  reportSelectedTerm=term;
- const rows=data.assessments.filter(a=>a.studentId===s.id&&(a.term||'Term 1')===term);
- const avg=rows.length?rows.reduce((x,a)=>x+Number(a.final||0),0)/rows.length:0;
+ const rows=reportCardSubjectRows(s,term);
+ const entered=rows.filter(a=>a.hasResult);
+ const avg=entered.length?entered.reduce((x,a)=>x+Number(a.final||0),0)/entered.length:0;
+ const missing=rows.length-entered.length;
  const logo=data.school.logoUrl?`<img src="${data.school.logoUrl}" alt="School Logo" style="max-width:120px;max-height:90px;object-fit:contain;display:block;margin:0 auto 10px">`:'';
+ const grading=`<p class="small"><b>Grading scale:</b> A ≥ ${Number(data.school.gradeAMin??75)}; B ≥ ${Number(data.school.gradeBMin??60)}; C ≥ ${Number(data.school.gradeCMin??50)}; D ≥ ${Number(data.school.gradeDMin??40)}; F below ${Number(data.school.gradeDMin??40)}.</p>`;
  document.getElementById('reportArea').innerHTML=`<div class="card">
  ${logo}<h3 style="text-align:center">${esc(data.school.name)}</h3>
  <p style="text-align:center"><b>Academic Year:</b> ${esc(data.school.year)} &nbsp; <b>Term:</b> ${esc(term)}</p>
  <p><b>Student:</b> ${esc(s.name)} &nbsp; <b>Class:</b> ${esc(cls(s.classId))}</p>
- ${table(['Subject','Formative','Summative','Final','Grade','Remark'],rows.map(a=>[esc(a.subjectName),a.formative,a.summative,a.final,grade(Number(a.final)||0),`<span class="${remark(Number(a.final)||0)==='PASS'?'pass':'fail'}">${remark(Number(a.final)||0)}</span>`]))}
- <p><b>Average:</b> ${avg.toFixed(2)} / 100</p></div>`;
+ ${table(['Subject','Formative','Summative','Final','Grade','Remark'],rows.map(a=>a.hasResult?[esc(a.subjectName),a.formative??'—',a.summative??'—',a.final,grade(Number(a.final)),`<span class="${remark(Number(a.final))==='PASS'?'pass':'fail'}">${remark(Number(a.final))}</span>`]:[esc(a.subjectName),'—','—','—','—','<span class="fail">MARKS PENDING</span>']))}
+ <p><b>Average of entered subjects:</b> ${avg.toFixed(2)} / 100 &nbsp; <b>Completed:</b> ${entered.length}/${rows.length} &nbsp; <b>Pending:</b> ${missing}</p>${grading}</div>`;
 }
+
 function showOverallAverageReport(){
  const s=selectedReportStudent();if(!s)return;
  const terms=termList();
  const termRows=terms.map(term=>{
-   const rows=data.assessments.filter(a=>a.studentId===s.id&&(a.term||'Term 1')===term);
+   const rows=data.assessments.filter(a=>a.studentId===s.id&&String(a.classId||s.classId)===String(s.classId)&&(a.term||'Term 1')===term&&(!a.academicYear||String(a.academicYear)===String(data.school.year)));
    const avg=rows.length?rows.reduce((x,a)=>x+Number(a.final||0),0)/rows.length:null;
    return {term,avg,count:rows.length};
  });
@@ -1988,7 +2007,7 @@ async function loadOnlineData() {
     const t=teachersR.find(x=>x.id===a.teacher_id), sub=subjectsR.find(x=>x.id===a.subject_id), c=classesR.find(x=>x.id===a.class_id);
     const final=Number(a.final ?? ((a.formative||0)+(a.summative||0)));
     return {id:a.id,studentId:a.student_id,teacherId:a.teacher_id,subjectId:a.subject_id,classId:a.class_id,
-      teacherName:t?.name||'',subjectName:sub?.name||'',className:c?(c.name+(c.stream?' '+c.stream:'')):'',term:a.term||'',
+      teacherName:t?.name||'',subjectName:sub?.name||'',className:c?(c.name+(c.stream?' '+c.stream:'')):'',term:a.term||'',academicYear:a.academic_year||a.academicYear||'',
       classwork:Number(a.classwork||0),homework:Number(a.homework||0),quiz:Number(a.quiz_test||0),assignment:Number(a.assignment||0),
       formative:Number(a.formative||0),summative:Number(a.summative||0),final,grade:grade(final),remark:remark(final)};
   });
