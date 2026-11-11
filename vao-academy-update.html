@@ -84,6 +84,13 @@ body{line-height:1.45}
 #main th,#main td{padding:10px 12px;vertical-align:top;overflow-wrap:anywhere;word-break:normal}
 #main th{font-weight:700;line-height:1.35}
 #main .table-scroll,#main .vao-results-wrap{width:100%;max-width:100%;overflow-x:auto;overflow-y:visible;-webkit-overflow-scrolling:touch}
+/* Report Card: keep the first label column and table headings visible while scrolling */
+#main .report-card-scroll{width:100%;max-width:100%;max-height:65vh;overflow:auto;position:relative;isolation:isolate;-webkit-overflow-scrolling:touch;border:1px solid #d8e0e8;border-radius:8px;background:#fff}
+#main .report-card-scroll table{width:max-content;min-width:100%;margin:0;border-collapse:separate;border-spacing:0}
+#main .report-card-scroll thead th{position:sticky;top:0;z-index:5;background:#eaf2f8;box-shadow:0 1px 0 #cbd5e1}
+#main .report-card-scroll th:first-child,#main .report-card-scroll td:first-child{position:sticky;left:0;z-index:3;background:#f8fafc;min-width:150px}
+#main .report-card-scroll thead th:first-child{z-index:7;background:#eaf2f8}
+
 #main .notice{margin:12px 0;overflow-wrap:anywhere}
 #main img{max-width:100%;height:auto}
 #main .badge{white-space:normal;line-height:1.35}
@@ -1365,7 +1372,7 @@ function showReportCard(){
  ${logo}<h3 style="text-align:center">${esc(data.school.name)}</h3>
  <p style="text-align:center"><b>Academic Year:</b> ${esc(data.school.year)} &nbsp; <b>Term:</b> ${esc(term)}</p>
  <p><b>Student:</b> ${esc(s.name)} &nbsp; <b>Class:</b> ${esc(cls(s.classId))}</p>
- ${table(['Subject','Formative','Summative','Final','Grade','Remark'],rows.map(a=>a.hasResult?[esc(a.subjectName),a.formative??'—',a.summative??'—',a.final,grade(Number(a.final)),`<span class="${remark(Number(a.final))==='PASS'?'pass':'fail'}">${remark(Number(a.final))}</span>`]:[esc(a.subjectName),'—','—','—','—','<span class="fail">MARKS PENDING</span>']))}
+ <div class=\"report-card-scroll\">${table(['Subject','Formative','Summative','Final','Grade','Remark'],rows.map(a=>a.hasResult?[esc(a.subjectName),a.formative??'—',a.summative??'—',a.final,grade(Number(a.final)),`<span class="${remark(Number(a.final))==='PASS'?'pass':'fail'}">${remark(Number(a.final))}</span>`]:[esc(a.subjectName),'—','—','—','—','<span class="fail">MARKS PENDING</span>']))}</div>
  <p><b>Average of entered subjects:</b> ${avg.toFixed(2)} / 100 &nbsp; <b>Completed:</b> ${entered.length}/${rows.length} &nbsp; <b>Pending:</b> ${missing}</p>${grading}</div>`;
 }
 
@@ -1384,7 +1391,7 @@ function showOverallAverageReport(){
  document.getElementById('reportArea').innerHTML=`<div class="card">${logo}<h3 style="text-align:center">${esc(data.school.name)}</h3>
  <p style="text-align:center"><b>OVERALL AVERAGE REPORT</b></p>
  <p><b>Academic Year:</b> ${esc(data.school.year)} &nbsp; <b>Student:</b> ${esc(s.name)} &nbsp; <b>Class:</b> ${esc(cls(s.classId))}</p>
- ${table(['Term','Average /100','Assessments'],termRows.map(r=>[esc(r.term),r.avg===null?'—':r.avg.toFixed(2),r.count]))}
+ <div class=\"report-card-scroll\">${table(['Term','Average /100','Assessments'],termRows.map(r=>[esc(r.term),r.avg===null?'—':r.avg.toFixed(2),r.count]))}</div>
  <p><b>Overall Average:</b> ${overall.toFixed(2)} / 100</p>
  <p class="small">Configured terms: ${terms.length}. Overall average is calculated from the terms that currently have results.</p></div>`;
 }
@@ -1665,7 +1672,7 @@ async function downloadProtectedWorkbook(sheetSpecs, filename){
     }
    }
   }
-  sh.views=[{state:'frozen',ySplit:spec.freezeRows||1}];
+  sh.views=[{state:'frozen',ySplit:spec.freezeRows||1,xSplit:spec.freezeCols||0}];
   if(spec.autoFilter) sh.autoFilter=spec.autoFilter;
   if(spec.markLimits){
    for(let i=0;i<spec.markLimits.length;i++){
@@ -1713,7 +1720,7 @@ async function downloadScoreSheet(){
  const instructionsMatrix=XLSX.utils.sheet_to_json(ins,{header:1,defval:''});
  const studentStartRow=12, studentEndRow=studentStartRow+Math.max(students.length,1)-1;
  await downloadProtectedWorkbook([
-  {name:'Score Sheet',matrix:scoreMatrix,cols:[38,20,30,...tasks.map(()=>16)],freezeRows:10,
+  {name:'Score Sheet',matrix:scoreMatrix,cols:[38,20,30,...tasks.map(()=>16)],freezeRows:10,freezeCols:3,
    autoFilter:{from:{row:10,column:1},to:{row:Math.max(10,studentEndRow),column:3+tasks.length}},
    markStartRow:studentStartRow,markEndRow:studentEndRow,markStartCol:4,
    markLimits:tasks.map(task=>sheetType==='summative'?100:Number(task.maxMark||0)),
