@@ -267,7 +267,7 @@ const adminPages=[
 ];
 const teacherPages=[
  ["tdashboard","My Dashboard"],["myattendance","My Attendance"],["classattendance","Class Attendance"],["mytimetable","My Timetable"],["tclasses","My Classes"],["tsubjects","My Subjects"],
- ["tstudents","My Students"],["enter","Enter Assessment"],["tresults","My Results"],["tprofile","My Profile"]
+ ["tstudents","My Students"],["reportcards","Report Cards"],["enter","Enter Assessment"],["tresults","My Results"],["tprofile","My Profile"]
 ];
 function openJointExam(){ window.open("VAO_Academy_JOINT_EXAM.html", "_blank"); }
 function renderNav(){
@@ -1285,45 +1285,87 @@ function printStudentCertificate(id, termOverride){
   openPrintWindow('Final Results Certificate',body);
 }
 
+let reportSelectedClass = '';
+let reportSelectedStudent = '';
+
+function reportAllowedClasses(){
+ const all = data.classes || [];
+ if(session.role === 'admin') return all;
+ const teacher = me();
+ if(!teacher) return [];
+ const ids = new Set((data.assignments||[]).filter(a=>a.teacherId===teacher.id).map(a=>String(a.classId)));
+ return all.filter(c=>ids.has(String(c.id)));
+}
+function reportAllowedStudents(classId){
+ const classes = reportAllowedClasses();
+ if(!classes.some(c=>String(c.id)===String(classId))) return [];
+ return (data.students||[]).filter(s=>String(s.classId)===String(classId));
+}
+function reportClassChanged(){
+ reportSelectedClass = document.getElementById('rcClass')?.value || '';
+ reportSelectedStudent = '';
+ const students = reportAllowedStudents(reportSelectedClass);
+ const el = document.getElementById('rcStudent');
+ if(el) el.innerHTML = '<option value="">Select student</option>' +
+   students.map(s=>`<option value="${esc(s.id)}">${esc(s.name)}</option>`).join('');
+ const area = document.getElementById('reportArea');
+ if(area) area.innerHTML = '';
+}
 function reportcards(){
- const term=reportSelectedTerm||data.school.term||"Term 1";
+ const term = reportSelectedTerm || data.school.term || 'Term 1';
+ const classes = reportAllowedClasses();
+ if(!classes.length) return '<h2>Report Cards</h2><div class="notice">No classes are assigned to your account.</div>';
+ if(!classes.some(c=>String(c.id)===String(reportSelectedClass))) reportSelectedClass = String(classes[0].id);
+ const students = reportAllowedStudents(reportSelectedClass);
+ if(!students.some(s=>String(s.id)===String(reportSelectedStudent))) reportSelectedStudent = '';
  return `<h2>Report Cards</h2>
  <div class="toolbar">
- <label>Term <select id="rcTerm" onchange="reportSelectedTerm=this.value">${termOptions(term)}</select></label>
- <select id="rcStudent"><option value="">Select student</option>${data.students.map(s=>`<option value="${s.id}">${esc(s.name)}</option>`).join("")}</select>
+ <label>Class <select id="rcClass" onchange="reportClassChanged()">${classes.map(c=>`<option value="${esc(c.id)}" ${String(c.id)===String(reportSelectedClass)?'selected':''}>${esc(c.name)}${c.stream?' - '+esc(c.stream):''}</option>`).join('')}</select></label>
+ <label>Term <select id="rcTerm" onchange="reportSelectedTerm=this.value;document.getElementById('reportArea').innerHTML=''">${termOptions(term)}</select></label>
+ <label>Student <select id="rcStudent" onchange="reportSelectedStudent=this.value;document.getElementById('reportArea').innerHTML=''"><option value="">Select student</option>${students.map(s=>`<option value="${esc(s.id)}" ${String(s.id)===String(reportSelectedStudent)?'selected':''}>${esc(s.name)}</option>`).join('')}</select></label>
  <button onclick="showReportCard()">VIEW REPORT CARD</button>
  <button onclick="showOverallAverageReport()">OVERALL AVERAGE REPORT</button>
  </div><div id="reportArea"></div>`;
 }
+function selectedReportStudent(){
+ const classId = document.getElementById('rcClass')?.value;
+ const studentId = document.getElementById('rcStudent')?.value;
+ const student = reportAllowedStudents(classId).find(s=>String(s.id)===String(studentId));
+ if(!student) {alert('Select a student from an available class.');return null;}
+ reportSelectedClass=classId;
+ reportSelectedStudent=studentId;
+ return student;
+}
 function showReportCard(){
- let s=byId(data.students,rcStudent.value);if(!s)return alert("Select a student.");
- const term=rcTerm.value;
- let rows=data.assessments.filter(a=>a.studentId===s.id&&(a.term||"Term 1")===term);
- let avg=rows.length?rows.reduce((x,a)=>x+a.final,0)/rows.length:0;
- const logo=data.school.logoUrl?`<img src="${data.school.logoUrl}" alt="School Logo" style="max-width:120px;max-height:90px;object-fit:contain;display:block;margin:0 auto 10px">`:"";
- document.getElementById("reportArea").innerHTML=`<div class="card">
+ const s=selectedReportStudent();if(!s)return;
+ const term=document.getElementById('rcTerm').value;
+ reportSelectedTerm=term;
+ const rows=data.assessments.filter(a=>a.studentId===s.id&&(a.term||'Term 1')===term);
+ const avg=rows.length?rows.reduce((x,a)=>x+Number(a.final||0),0)/rows.length:0;
+ const logo=data.school.logoUrl?`<img src="${data.school.logoUrl}" alt="School Logo" style="max-width:120px;max-height:90px;object-fit:contain;display:block;margin:0 auto 10px">`:'';
+ document.getElementById('reportArea').innerHTML=`<div class="card">
  ${logo}<h3 style="text-align:center">${esc(data.school.name)}</h3>
  <p style="text-align:center"><b>Academic Year:</b> ${esc(data.school.year)} &nbsp; <b>Term:</b> ${esc(term)}</p>
  <p><b>Student:</b> ${esc(s.name)} &nbsp; <b>Class:</b> ${esc(cls(s.classId))}</p>
- ${table(["Subject","Formative","Summative","Final","Grade","Remark"],rows.map(a=>[esc(a.subjectName),a.formative,a.summative,a.final,grade(Number(a.final)||0),`<span class="${remark(Number(a.final)||0)==="PASS"?"pass":"fail"}">${remark(Number(a.final)||0)}</span>`]))}
+ ${table(['Subject','Formative','Summative','Final','Grade','Remark'],rows.map(a=>[esc(a.subjectName),a.formative,a.summative,a.final,grade(Number(a.final)||0),`<span class="${remark(Number(a.final)||0)==='PASS'?'pass':'fail'}">${remark(Number(a.final)||0)}</span>`]))}
  <p><b>Average:</b> ${avg.toFixed(2)} / 100</p></div>`;
 }
 function showOverallAverageReport(){
- const s=byId(data.students,rcStudent.value); if(!s)return alert("Select a student.");
+ const s=selectedReportStudent();if(!s)return;
  const terms=termList();
  const termRows=terms.map(term=>{
-   const rows=data.assessments.filter(a=>a.studentId===s.id&&(a.term||"Term 1")===term);
+   const rows=data.assessments.filter(a=>a.studentId===s.id&&(a.term||'Term 1')===term);
    const avg=rows.length?rows.reduce((x,a)=>x+Number(a.final||0),0)/rows.length:null;
    return {term,avg,count:rows.length};
  });
  const available=termRows.filter(x=>x.avg!==null);
- if(!available.length)return alert("No results are available for this student in the configured terms.");
+ if(!available.length)return alert('No results are available for this student in the configured terms.');
  const overall=available.reduce((x,r)=>x+r.avg,0)/available.length;
- const logo=data.school.logoUrl?`<img src="${data.school.logoUrl}" alt="School Logo" style="max-width:120px;max-height:90px;object-fit:contain;display:block;margin:0 auto 10px">`:"";
- document.getElementById("reportArea").innerHTML=`<div class="card">${logo}<h3 style="text-align:center">${esc(data.school.name)}</h3>
+ const logo=data.school.logoUrl?`<img src="${data.school.logoUrl}" alt="School Logo" style="max-width:120px;max-height:90px;object-fit:contain;display:block;margin:0 auto 10px">`:'';
+ document.getElementById('reportArea').innerHTML=`<div class="card">${logo}<h3 style="text-align:center">${esc(data.school.name)}</h3>
  <p style="text-align:center"><b>OVERALL AVERAGE REPORT</b></p>
  <p><b>Academic Year:</b> ${esc(data.school.year)} &nbsp; <b>Student:</b> ${esc(s.name)} &nbsp; <b>Class:</b> ${esc(cls(s.classId))}</p>
- ${table(["Term","Average /100","Assessments"],termRows.map(r=>[esc(r.term),r.avg===null?"—":r.avg.toFixed(2),r.count]))}
+ ${table(['Term','Average /100','Assessments'],termRows.map(r=>[esc(r.term),r.avg===null?'—':r.avg.toFixed(2),r.count]))}
  <p><b>Overall Average:</b> ${overall.toFixed(2)} / 100</p>
  <p class="small">Configured terms: ${terms.length}. Overall average is calculated from the terms that currently have results.</p></div>`;
 }
