@@ -512,6 +512,64 @@ async function decideStaffLeave(id,status){if(session.role!=='admin')return aler
 function myattendance(){return `<h2>My Attendance</h2><div class="notice">Your leave and permission requests are available under Staff Leave & Permission. Attendance history is limited to records allowed by your school account.</div><div class="card"><button onclick="go('staffleave')">OPEN LEAVE & PERMISSION</button><button class="secondary" onclick="loadMyAttendance()">LOAD MY ATTENDANCE</button><div id="myAttendanceRows"></div></div>`;}
 async function loadMyAttendance(){const host=document.getElementById('myAttendanceRows');if(!host)return;const {data:rows,error}=await supabaseClient.from('staff_attendance_records').select('*').eq('school_id',currentSchoolId).eq('teacher_id',session.teacherId).order('attendance_date',{ascending:false}).limit(100);if(error){host.innerHTML=`<p class="notice">${esc(error.message)}. Staff clock-in records can be enabled after the staff-attendance table is configured.</p>`;return;}host.innerHTML=(rows||[]).map(r=>`<p>${esc(r.attendance_date)} — ${esc(r.status)} — ${esc(r.check_in||'')}</p>`).join('')||'<p>No staff attendance records found.</p>';}
 
+function adminPrintAllClassReportCards(){
+ if(session?.role!=='admin' || adminPreviewTeacherId) return alert('Only School Admin can print the full class set.');
+ const classId=document.getElementById('adminBulkRcClass')?.value;
+ const term=document.getElementById('adminBulkRcTerm')?.value || data.school.term || 'Term 1';
+ if(!classId) return alert('Please select a class first.');
+ const students=(data.students||[]).filter(st=>String(st.classId)===String(classId)).sort((a,b)=>(a.name||'').localeCompare(b.name||''));
+ if(!students.length) return alert('No students were found in the selected class.');
+ const cards=students.map(st=>{
+  const rows=reportCardSubjectRows(st,term);
+  const entered=rows.filter(r=>r.hasResult);
+  const avg=entered.length?entered.reduce((sum,r)=>sum+Number(r.final||0),0)/entered.length:0;
+  const ranking=reportCardRanking(st,term,rows);
+  const wholeMark=v=>(v===null||v===undefined||v===''?'—':String(Math.round(Number(v))));
+  const subjectRows=rows.map(r=>{
+   const rank=ranking.subjectPositions[String(r.subjectId)];
+   return r.hasResult
+    ? [esc(r.subjectName),wholeMark(r.formative),wholeMark(r.summative),wholeMark(r.final),(rank?.position??'—'),`<span class="grade-pill grade-${grade(Number(r.final))}">${grade(Number(r.final))}</span>`,`<span class="remark-pill remark-${String(remark(Number(r.final))).toUpperCase().replace(/\s+/g,'-')}">${remark(Number(r.final))}</span>`]
+    : [esc(r.subjectName),'—','—','—','—','—','<span class="fail">MARKS PENDING</span>'];
+  });
+  const overall=ranking.fullClassAccess
+   ? (ranking.overall.complete?`<b>Overall Class Position:</b> ${ranking.overall.position}/${ranking.overall.total}`:'<b>Overall Class Position:</b> Pending (complete marks are required)')
+   : '<b>Overall Class Position:</b> Not available under subject-teacher access';
+  const logo=data.school.logoUrl?`<img src="${data.school.logoUrl}" alt="School Logo" style="max-width:120px;max-height:90px;object-fit:contain;display:block;margin:0 auto 10px">`:'';
+  const gradeValue=grade(Math.round(avg));
+  return `<section class="card report-card-design bulk-report-card">
+   ${logo}<h3 style="text-align:center">${esc(data.school.name)}</h3><div class="report-school-subtitle">Student Academic Report Card</div>
+   <div class="report-student-strip"><div class="report-info"><b>Student</b>${esc(st.name)}</div><div class="report-info"><b>Class</b>${esc(cls(st.classId))}</div><div class="report-info"><b>Academic Year / Term</b>${esc(data.school.year)} · ${esc(term)}</div></div>
+   <div class="report-card-scroll">${table(['Subject','Formative','Summative','Final','Position','Grade','Remark'],subjectRows)}</div>
+   <div class="report-summary"><div class="report-summary-item report-average-item"><b>Average</b><strong>${Math.round(avg)} / 100</strong></div><div class="report-summary-item report-grade-item"><b>Grade</b><strong><span class="grade-pill grade-${gradeValue}">${gradeValue}</span></strong></div><div class="report-summary-item report-overall-position"><b>Overall Class Position</b><strong>${overall}</strong></div></div>
+   <p class="report-note">Subject position is shown as a number among classmates with a recorded result in that subject. Tied marks receive the same position. Overall class position is calculated from complete results only.</p>
+   <p class="small"><b>Grading scale:</b> A ≥ ${Number(data.school.gradeAMin??75)}; B ≥ ${Number(data.school.gradeBMin??60)}; C ≥ ${Number(data.school.gradeCMin??50)}; D ≥ ${Number(data.school.gradeDMin??40)}; F below ${Number(data.school.gradeDMin??40)}.</p>
+  </section>`;
+ }).join('');
+ const win=window.open('','_blank');
+ if(!win) return alert('Please allow pop-ups for VAO Academy, then try again.');
+ const styles=[...document.querySelectorAll('style')].map(el=>el.textContent).join('\n');
+ win.document.open();
+ win.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${esc(cls(classId))} - Report Cards</title><style>${styles}
+ body{background:#fff!important;padding:12px!important}
+ .bulk-report-card{page-break-after:always;break-after:page;max-width:100%!important;margin:0 auto 18px!important;box-shadow:none!important}
+ .bulk-report-card:last-child{page-break-after:auto;break-after:auto}
+ @page{size:A4 landscape;margin:8mm}
+ .bulk-print-toolbar{position:sticky;top:0;z-index:9999;display:flex;gap:10px;justify-content:center;align-items:center;padding:12px;background:#f1f5f9;border:1px solid #cbd5e1;border-radius:10px;margin:0 auto 16px;max-width:900px}
+ .bulk-print-toolbar button{border:0;border-radius:7px;padding:11px 18px;font-weight:700;cursor:pointer;background:#155eaa;color:#fff}
+ .bulk-print-toolbar button.pdf{background:#166534}
+ .bulk-print-help{text-align:center;font-size:13px;color:#334155;margin:0 0 14px}
+ @media print{body{padding:0!important}.bulk-print-toolbar,.bulk-print-help{display:none!important}.bulk-report-card{margin:0 auto!important;page-break-after:always;break-after:page}.bulk-report-card:last-child{page-break-after:auto;break-after:auto}}
+ </style></head><body>
+ <div class="bulk-print-toolbar">
+  <button onclick="window.print()">PRINT ALL REPORT CARDS</button>
+  <button class="pdf" onclick="window.print()">SAVE ALL AS PDF</button>
+  <button style="background:#475569" onclick="window.close()">CLOSE</button>
+ </div>
+ <p class="bulk-print-help">To save a PDF: click “SAVE ALL AS PDF”, then choose “Save as PDF” as the printer/destination in the print window. Choose a folder and save.</p>
+ ${cards}
+ </body></html>`);
+ win.document.close();
+}
 function dashboard(){
  return `<h2>${esc(data.school.name)}</h2>
  <div class="grid">
@@ -521,6 +579,16 @@ function dashboard(){
  <div class="stat">Subjects<strong>${data.subjects.length}</strong></div>
  <div class="stat">Assessments<strong>${data.assessments.length}</strong></div>
  </div>
+ ${session?.role==='admin' && !adminPreviewTeacherId ? `<div class="card" style="margin-top:18px">
+ <h3>Print Class Report Cards</h3>
+ <p class="small">School Admin can print report cards for all students in a selected class at once. Choose the class and term, then print or save as PDF.</p>
+ <div class="formgrid">
+ <label>Class<select id="adminBulkRcClass"><option value="">Select class</option>${data.classes.map(c=>`<option value="${esc(c.id)}">${esc(c.name)}${c.stream?' - '+esc(c.stream):''}</option>`).join('')}</select></label>
+ <label>Term<select id="adminBulkRcTerm">${termOptions(data.school.term||'Term 1')}</select></label>
+ </div>
+ <div class="toolbar"><button onclick="adminPrintAllClassReportCards()">PRINT ALL STUDENTS' REPORT CARDS</button></div>
+ <p class="small">This function is available to School Admin only. It does not change marks or student records.</p>
+ </div>` : ''}
  <div class="notice">All school modules are connected in this integrated prototype. The final online version will replace browser storage with a hosted database and server-side school isolation.</div>`;
 }
 function scheduleRowsForTerm(term,type){
