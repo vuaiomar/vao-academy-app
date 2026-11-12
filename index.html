@@ -309,6 +309,7 @@ function go(id){
  if(id==="studentlist") setTimeout(renderStudentDirectory,0);
  if(id==="attendance") {setTimeout(loadAttendanceRows,0);setTimeout(loadClassTeacherAssignments,0);setTimeout(loadPendingAttendanceApprovals,0);}
  if(id==="classattendance") setTimeout(loadTeacherClassAttendance,0);
+ if(id==="reportcards" && session.role==='teacher' && !reportClassTeacherLoadStarted){reportClassTeacherLoadStarted=true;setTimeout(loadReportClassTeacherClasses,0);}
  if(id==="staffleave") setTimeout(loadStaffLeaveRows,0);
  if(id==="markmonitor") setTimeout(loadAdminMarkMonitor,0);
 }
@@ -1294,6 +1295,18 @@ function printStudentCertificate(id, termOverride){
 
 let reportSelectedClass = '';
 let reportSelectedStudent = '';
+let reportClassTeacherClassIds = [];
+let reportClassTeacherLoadStarted = false;
+
+async function loadReportClassTeacherClasses(){
+ if(session?.role!=='teacher' || !supabaseClient || !currentSchoolId || !session.teacherId) return;
+ try {
+  const {data:rows,error}=await supabaseClient.from('class_teacher_assignments').select('class_id').eq('school_id',currentSchoolId).eq('teacher_id',session.teacherId).eq('is_active',true);
+  if(error) throw error;
+  reportClassTeacherClassIds=(rows||[]).map(r=>String(r.class_id));
+ } catch(e) { console.warn('Could not load class-teacher report access:',e.message); }
+ if(active==='reportcards') document.getElementById('main').innerHTML=reportcards();
+}
 
 function reportAllowedClasses(){
  const all = data.classes || [];
@@ -1301,6 +1314,7 @@ function reportAllowedClasses(){
  const teacher = me();
  if(!teacher) return [];
  const ids = new Set((data.assignments||[]).filter(a=>a.teacherId===teacher.id).map(a=>String(a.classId)));
+ reportClassTeacherClassIds.forEach(id=>ids.add(String(id)));
  return all.filter(c=>ids.has(String(c.id)));
 }
 function reportAllowedStudents(classId){
@@ -1326,6 +1340,7 @@ function reportcards(){
  const students = reportAllowedStudents(reportSelectedClass);
  if(!students.some(s=>String(s.id)===String(reportSelectedStudent))) reportSelectedStudent = '';
  return `<h2>Report Cards</h2>
+ <p class="small">Class teachers can view the complete subject list for each selected student in their assigned class, including subjects taught by other teachers.</p>
  <div class="toolbar">
  <label>Class <select id="rcClass" onchange="reportClassChanged()">${classes.map(c=>`<option value="${esc(c.id)}" ${String(c.id)===String(reportSelectedClass)?'selected':''}>${esc(c.name)}${c.stream?' - '+esc(c.stream):''}</option>`).join('')}</select></label>
  <label>Term <select id="rcTerm" onchange="reportSelectedTerm=this.value;document.getElementById('reportArea').innerHTML=''">${termOptions(term)}</select></label>
@@ -1348,7 +1363,9 @@ function reportCardSubjectRows(student, term){
  const assignedIds=[...new Set((data.assignments||[])
    .filter(a=>String(a.classId)===String(student.classId) && (!a.term || a.term===term))
    .map(a=>String(a.subjectId)).filter(Boolean))];
- const subjectIds=assignedIds.length?assignedIds:[...new Set((data.assessments||[])
+ const classSubjectIds=(data.classSubjects||[]).filter(x=>String(x.classId||x.class_id)===String(student.classId) && (!x.term || x.term===term)).map(x=>String(x.subjectId||x.subject_id)).filter(Boolean);
+ const completeSubjectIds=[...new Set([...assignedIds,...classSubjectIds])];
+ const subjectIds=completeSubjectIds.length?completeSubjectIds:[...new Set((data.assessments||[])
    .filter(a=>String(a.studentId)===String(student.id) && String(a.classId||student.classId)===String(student.classId) && (a.term||'Term 1')===term && (!a.academicYear||String(a.academicYear)===year))
    .map(a=>String(a.subjectId)).filter(Boolean))];
  return subjectIds.map(subjectId=>{
