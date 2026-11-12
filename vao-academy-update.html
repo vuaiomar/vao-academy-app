@@ -1318,7 +1318,8 @@ function reportAllowedStudents(classId){
  return (data.students||[]).filter(s=>String(s.classId)===String(classId));
 }
 async function loadReportCardTeacherAccess(){
- if(!document.getElementById('rcClass')) return;
+ // Run even when the teacher has no ordinary subject assignment; Class Teacher assignments are loaded here.
+ if(active!=='reportcards') return;
  reportClassTeacherAccessError='';
  if(session?.role==='admin'){reportClassTeacherClassIds=[];reportClassTeacherAssessments=[];reportClassTeacherAssignments=[];document.getElementById('main').innerHTML=reportcards();return;}
  if(!supabaseClient || !currentSchoolId || !session?.teacherId){reportClassTeacherAccessError='An active teacher login is required.';document.getElementById('main').innerHTML=reportcards();return;}
@@ -1414,46 +1415,6 @@ function reportCardSubjectRows(student, term){
      :{subjectId,subjectName:subject?.name||'Subject',formative:null,summative:null,final:null,hasResult:false};
  }).sort((a,b)=>(a.subjectName||'').localeCompare(b.subjectName||''));
 }
-function reportPositionLabel(position){
- if(position===null||position===undefined)return '—';
- const n=Number(position);const suffix=(n%100>=11&&n%100<=13)?'th':({1:'st',2:'nd',3:'rd'}[n%10]||'th');
- return `${n}${suffix}`;
-}
-function reportCardRanking(student,term,rows){
- const classmates=(data.students||[]).filter(x=>String(x.classId)===String(student.classId));
- const subjectPositions={};
- rows.forEach(subjectRow=>{
-   if(!subjectRow.hasResult){subjectPositions[String(subjectRow.subjectId)]={position:null,total:0};return;}
-   const subjectScores=classmates.map(peer=>{
-     const peerRow=reportCardSubjectRows(peer,term).find(r=>String(r.subjectId)===String(subjectRow.subjectId));
-     return peerRow&&peerRow.hasResult?{student:peer,score:Number(peerRow.final)}:null;
-   }).filter(v=>v&&Number.isFinite(v.score));
-   const score=Number(subjectRow.final);
-   const topScore=subjectScores.length?Math.max(...subjectScores.map(x=>x.score)):null;
-   const topStudents=topScore===null?[]:subjectScores.filter(x=>x.score===topScore).map(x=>x.student.name).filter(Boolean);
-   subjectPositions[String(subjectRow.subjectId)]={position:1+subjectScores.filter(v=>v.score>score).length,total:subjectScores.length,topStudent:topStudents.join(', ')};
- });
- // Overall class position is shown only when the viewer can access every subject in the class.
- const fullClassAccess=session?.role==='admin'||reportIsClassTeacher(student.classId);
- let overall={position:null,total:0,average:null,complete:false};
- if(fullClassAccess&&rows.length){
-   const requiredIds=rows.map(r=>String(r.subjectId));
-   const classTotals=classmates.map(peer=>{
-     const peerRows=reportCardSubjectRows(peer,term);
-     const selected=requiredIds.map(id=>peerRows.find(r=>String(r.subjectId)===id));
-     if(selected.some(r=>!r||!r.hasResult))return null;
-     return {student:peer,average:selected.reduce((sum,r)=>sum+Number(r.final),0)/selected.length};
-   });
-   const targetRows=requiredIds.map(id=>rows.find(r=>String(r.subjectId)===id));
-   const complete=targetRows.length===requiredIds.length&&targetRows.every(r=>r&&r.hasResult);
-   const average=complete?targetRows.reduce((sum,r)=>sum+Number(r.final),0)/targetRows.length:null;
-   const eligible=classTotals.filter(v=>v!==null&&Number.isFinite(v.average));
-   const topAverage=eligible.length?Math.max(...eligible.map(v=>v.average)):null;
-   const topStudents=topAverage===null?[]:eligible.filter(v=>v.average===topAverage).map(v=>v.student.name).filter(Boolean);
-   overall={position:complete?1+eligible.filter(v=>v.average>average).length:null,total:eligible.length,average,complete,topStudent:topStudents.join(', ')};
- }
- return {subjectPositions,overall,fullClassAccess};
-}
 function showReportCard(){
  const s=selectedReportStudent();if(!s)return;
  const term=document.getElementById('rcTerm').value;
@@ -1462,24 +1423,14 @@ function showReportCard(){
  const entered=rows.filter(a=>a.hasResult);
  const avg=entered.length?entered.reduce((x,a)=>x+Number(a.final||0),0)/entered.length:0;
  const missing=rows.length-entered.length;
- const ranking=reportCardRanking(s,term,rows);
  const logo=data.school.logoUrl?`<img src="${data.school.logoUrl}" alt="School Logo" style="max-width:120px;max-height:90px;object-fit:contain;display:block;margin:0 auto 10px">`:'';
  const grading=`<p class="small"><b>Grading scale:</b> A ≥ ${Number(data.school.gradeAMin??75)}; B ≥ ${Number(data.school.gradeBMin??60)}; C ≥ ${Number(data.school.gradeCMin??50)}; D ≥ ${Number(data.school.gradeDMin??40)}; F below ${Number(data.school.gradeDMin??40)}.</p>`;
- const subjectRows=rows.map(a=>{
-   const rank=ranking.subjectPositions[String(a.subjectId)];
-   return a.hasResult?[esc(a.subjectName),a.formative??'—',a.summative??'—',a.final,reportPositionLabel(rank?.position),esc(rank?.topStudent||'—'),grade(Number(a.final)),`<span class="${remark(Number(a.final))==='PASS'?'pass':'fail'}">${remark(Number(a.final))}</span>`]
-     :[esc(a.subjectName),'—','—','—','—','—','—','<span class="fail">MARKS PENDING</span>'];
- });
- const overallPosition=ranking.fullClassAccess
-   ? (ranking.overall.complete?`<b>Overall Class Position:</b> ${reportPositionLabel(ranking.overall.position)} of ${ranking.overall.total} &nbsp; <b>Class Top Student:</b> ${esc(ranking.overall.topStudent||'—')}`:'<b>Overall Class Position:</b> Pending (complete marks are required)')
-   : '<b>Overall Class Position:</b> Not available under subject-teacher access';
  document.getElementById('reportArea').innerHTML=`<div class="card">
  ${logo}<h3 style="text-align:center">${esc(data.school.name)}</h3>
  <p style="text-align:center"><b>Academic Year:</b> ${esc(data.school.year)} &nbsp; <b>Term:</b> ${esc(term)}</p>
  <p><b>Student:</b> ${esc(s.name)} &nbsp; <b>Class:</b> ${esc(cls(s.classId))}</p>
- <div class=\"report-card-scroll\">${table(['Subject','Formative','Summative','Final','Subject Position','Top Student in Subject','Grade','Remark'],subjectRows)}</div>
- <p><b>Average of entered subjects:</b> ${avg.toFixed(2)} / 100 &nbsp; <b>Completed:</b> ${entered.length}/${rows.length} &nbsp; <b>Pending:</b> ${missing}</p>
- <p>${overallPosition}</p><p class="small">Subject position is calculated among classmates with a recorded result in that subject. Tied marks receive the same position. Overall class position is calculated from the average across all listed subjects and is shown for complete results only.</p>${grading}</div>`;
+ <div class=\"report-card-scroll\">${table(['Subject','Formative','Summative','Final','Grade','Remark'],rows.map(a=>a.hasResult?[esc(a.subjectName),a.formative??'—',a.summative??'—',a.final,grade(Number(a.final)),`<span class="${remark(Number(a.final))==='PASS'?'pass':'fail'}">${remark(Number(a.final))}</span>`]:[esc(a.subjectName),'—','—','—','—','<span class="fail">MARKS PENDING</span>']))}</div>
+ <p><b>Average of entered subjects:</b> ${avg.toFixed(2)} / 100 &nbsp; <b>Completed:</b> ${entered.length}/${rows.length} &nbsp; <b>Pending:</b> ${missing}</p>${grading}</div>`;
 }
 
 function showOverallAverageReport(){
