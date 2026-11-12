@@ -558,7 +558,15 @@ function adminPrintAllClassReportCards(){
  .bulk-print-toolbar button{border:0;border-radius:7px;padding:11px 18px;font-weight:700;cursor:pointer;background:#155eaa;color:#fff}
  .bulk-print-toolbar button.pdf{background:#166534}
  .bulk-print-help{text-align:center;font-size:13px;color:#334155;margin:0 0 14px}
- @media print{body{padding:0!important}.bulk-print-toolbar,.bulk-print-help{display:none!important}.bulk-report-card{margin:0 auto!important;page-break-after:always;break-after:page}.bulk-report-card:last-child{page-break-after:auto;break-after:auto}}
+ @media print{
+  /* Override the app's unrelated print rule that hides everything except the student directory. */
+  body *{visibility:visible!important}
+  body{padding:0!important}
+  .bulk-print-toolbar,.bulk-print-help{display:none!important}
+  .bulk-report-card{display:block!important;visibility:visible!important;margin:0 auto!important;page-break-after:always;break-after:page}
+  .bulk-report-card *{visibility:visible!important}
+  .bulk-report-card:last-child{page-break-after:auto;break-after:auto}
+ }
  </style></head><body>
  <div class="bulk-print-toolbar">
   <button onclick="window.print()">PRINT ALL REPORT CARDS</button>
