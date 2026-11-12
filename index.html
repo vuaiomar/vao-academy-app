@@ -1727,7 +1727,9 @@ async function downloadScoreSheet(){
  const maxRow=['','','',...tasks.map(x=>sheetType==='summative'?100:x.maxMark)];
  const students=data.students.filter(s=>s.classId===cid);
  const scores=data.taskScores||[];
- const rows=students.map(s=>[s.id,s.admission||'',s.name,...tasks.map(task=>{const x=scores.find(z=>z.scheduleId===task.id&&z.studentId===s.id&&z.teacherId===t.id&&z.subjectId===sid&&z.classId===cid); if(x?.mark===undefined||x?.mark===null)return ''; return sheetType==='summative'?Number((Number(x.mark)*100/Number(task.maxMark||60)).toFixed(2)):x.mark;})]);
+ const rows=students.map(s=>[s.id,s.admission||'',s.name,...tasks.map(task=>{// Reuse any saved score for this school-scoped schedule/student/subject/class.
+ // Do not require the current teacher_id: assignments may have changed since marks were entered.
+ const x=scores.find(z=>z.scheduleId===task.id&&z.studentId===s.id&&z.subjectId===sid&&z.classId===cid); if(x?.mark===undefined||x?.mark===null)return ''; return sheetType==='summative'?Number((Number(x.mark)*100/Number(task.maxMark||60)).toFixed(2)):x.mark;})]);
  const ws=XLSX.utils.aoa_to_sheet([...metaRows,[],headers,maxRow,...rows]);
  ws['!cols']=[{wch:38},{wch:20},{wch:30},...tasks.map(()=>({wch:14}))];
  const ins=XLSX.utils.aoa_to_sheet([['Activity Code','Activity','Teacher Entry Maximum','Stored Maximum','Deadline'],...tasks.map(s=>[taskColumnCode(s),`${s.activityType} ${s.activityNumber}`,sheetType==='summative'?100:s.maxMark,s.maxMark,s.dueAt?new Date(s.dueAt).toLocaleString():'No deadline'])]);
