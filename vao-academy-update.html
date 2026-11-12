@@ -1318,7 +1318,8 @@ function reportAllowedStudents(classId){
  return (data.students||[]).filter(s=>String(s.classId)===String(classId));
 }
 async function loadReportCardTeacherAccess(){
- if(!document.getElementById('rcClass')) return;
+ // Run even when the teacher has no ordinary subject assignment; Class Teacher assignments are loaded here.
+ if(active!=='reportcards') return;
  reportClassTeacherAccessError='';
  if(session?.role==='admin'){reportClassTeacherClassIds=[];reportClassTeacherAssessments=[];reportClassTeacherAssignments=[];document.getElementById('main').innerHTML=reportcards();return;}
  if(!supabaseClient || !currentSchoolId || !session?.teacherId){reportClassTeacherAccessError='An active teacher login is required.';document.getElementById('main').innerHTML=reportcards();return;}
