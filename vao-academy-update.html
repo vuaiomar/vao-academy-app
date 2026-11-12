@@ -309,7 +309,6 @@ function go(id){
  if(id==="studentlist") setTimeout(renderStudentDirectory,0);
  if(id==="attendance") {setTimeout(loadAttendanceRows,0);setTimeout(loadClassTeacherAssignments,0);setTimeout(loadPendingAttendanceApprovals,0);}
  if(id==="classattendance") setTimeout(loadTeacherClassAttendance,0);
- if(id==="reportcards" && session.role==='teacher' && !reportClassTeacherLoadStarted){reportClassTeacherLoadStarted=true;setTimeout(loadReportClassTeacherClasses,0);}
  if(id==="staffleave") setTimeout(loadStaffLeaveRows,0);
  if(id==="markmonitor") setTimeout(loadAdminMarkMonitor,0);
 }
@@ -1295,27 +1294,10 @@ function printStudentCertificate(id, termOverride){
 
 let reportSelectedClass = '';
 let reportSelectedStudent = '';
-let reportClassTeacherClassIds = [];
-let reportClassTeacherLoadStarted = false;
-
-async function loadReportClassTeacherClasses(){
- if(session?.role!=='teacher' || !supabaseClient || !currentSchoolId || !session.teacherId) return;
- try {
-  const {data:rows,error}=await supabaseClient.from('class_teacher_assignments').select('class_id').eq('school_id',currentSchoolId).eq('teacher_id',session.teacherId).eq('is_active',true);
-  if(error) throw error;
-  reportClassTeacherClassIds=(rows||[]).map(r=>String(r.class_id));
- } catch(e) { console.warn('Could not load class-teacher report access:',e.message); }
- if(active==='reportcards') document.getElementById('main').innerHTML=reportcards();
-}
-
 function reportAllowedClasses(){
- const all = data.classes || [];
- if(session.role === 'admin') return all;
- const teacher = me();
- if(!teacher) return [];
- const ids = new Set((data.assignments||[]).filter(a=>a.teacherId===teacher.id).map(a=>String(a.classId)));
- reportClassTeacherClassIds.forEach(id=>ids.add(String(id)));
- return all.filter(c=>ids.has(String(c.id)));
+ // Report Cards follow the same school-scoped class list for Admin and all Teachers.
+ // The loaded data is already restricted to the current school.
+ return data.classes || [];
 }
 function reportAllowedStudents(classId){
  const classes = reportAllowedClasses();
@@ -1340,7 +1322,6 @@ function reportcards(){
  const students = reportAllowedStudents(reportSelectedClass);
  if(!students.some(s=>String(s.id)===String(reportSelectedStudent))) reportSelectedStudent = '';
  return `<h2>Report Cards</h2>
- <p class="small">Class teachers can view the complete subject list for each selected student in their assigned class, including subjects taught by other teachers.</p>
  <div class="toolbar">
  <label>Class <select id="rcClass" onchange="reportClassChanged()">${classes.map(c=>`<option value="${esc(c.id)}" ${String(c.id)===String(reportSelectedClass)?'selected':''}>${esc(c.name)}${c.stream?' - '+esc(c.stream):''}</option>`).join('')}</select></label>
  <label>Term <select id="rcTerm" onchange="reportSelectedTerm=this.value;document.getElementById('reportArea').innerHTML=''">${termOptions(term)}</select></label>
@@ -1727,9 +1708,7 @@ async function downloadScoreSheet(){
  const maxRow=['','','',...tasks.map(x=>sheetType==='summative'?100:x.maxMark)];
  const students=data.students.filter(s=>s.classId===cid);
  const scores=data.taskScores||[];
- const rows=students.map(s=>[s.id,s.admission||'',s.name,...tasks.map(task=>{// Reuse any saved score for this school-scoped schedule/student/subject/class.
- // Do not require the current teacher_id: assignments may have changed since marks were entered.
- const x=scores.find(z=>z.scheduleId===task.id&&z.studentId===s.id&&z.subjectId===sid&&z.classId===cid); if(x?.mark===undefined||x?.mark===null)return ''; return sheetType==='summative'?Number((Number(x.mark)*100/Number(task.maxMark||60)).toFixed(2)):x.mark;})]);
+ const rows=students.map(s=>[s.id,s.admission||'',s.name,...tasks.map(task=>{const x=scores.find(z=>z.scheduleId===task.id&&z.studentId===s.id&&z.teacherId===t.id&&z.subjectId===sid&&z.classId===cid); if(x?.mark===undefined||x?.mark===null)return ''; return sheetType==='summative'?Number((Number(x.mark)*100/Number(task.maxMark||60)).toFixed(2)):x.mark;})]);
  const ws=XLSX.utils.aoa_to_sheet([...metaRows,[],headers,maxRow,...rows]);
  ws['!cols']=[{wch:38},{wch:20},{wch:30},...tasks.map(()=>({wch:14}))];
  const ins=XLSX.utils.aoa_to_sheet([['Activity Code','Activity','Teacher Entry Maximum','Stored Maximum','Deadline'],...tasks.map(s=>[taskColumnCode(s),`${s.activityType} ${s.activityNumber}`,sheetType==='summative'?100:s.maxMark,s.maxMark,s.dueAt?new Date(s.dueAt).toLocaleString():'No deadline'])]);
