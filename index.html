@@ -310,7 +310,7 @@ function go(id){
  if(id==="attendance") {setTimeout(loadAttendanceRows,0);setTimeout(loadClassTeacherAssignments,0);setTimeout(loadPendingAttendanceApprovals,0);}
  if(id==="classattendance") setTimeout(loadTeacherClassAttendance,0);
  if(id==="staffleave") setTimeout(loadStaffLeaveRows,0);
- if(id==="markmonitor") setTimeout(loadAdminMarkMonitor,0);
+ if(id==="markmonitor") setTimeout(loadAdminMarkMonitor,0); if(id==="reportcards") setTimeout(loadReportCardTeacherAccess,0);
 }
 
 
@@ -1292,17 +1292,68 @@ function printStudentCertificate(id, termOverride){
   openPrintWindow('Final Results Certificate',body);
 }
 
-let reportSelectedClass = '';
-let reportSelectedStudent = '';
+let reportSelectedClass = ''; let reportSelectedStudent = '';
+// Report Card permissions are role-based: School Admin sees the whole school;
+// Subject Teachers see only their assigned classes/subjects; Class Teachers
+// see all subjects for the class/classes formally assigned to them.
+let reportClassTeacherClassIds = [];
+let reportClassTeacherAssessments = [];
+let reportClassTeacherAssignments = [];
+let reportClassTeacherAccessError = '';
+function reportIsClassTeacher(classId){
+ return session?.role==='teacher' && reportClassTeacherClassIds.some(id=>String(id)===String(classId));
+}
 function reportAllowedClasses(){
- // Report Cards follow the same school-scoped class list for Admin and all Teachers.
- // The loaded data is already restricted to the current school.
- return data.classes || [];
+ if(session?.role==='admin') return data.classes||[];
+ const teacherId=String(session?.teacherId||'');
+ const assignedClassIds=(data.assignments||[])
+   .filter(a=>String(a.teacherId)===teacherId && (!a.term || a.term===reportSelectedTerm))
+   .map(a=>String(a.classId));
+ const allowedIds=new Set([...assignedClassIds,...reportClassTeacherClassIds.map(String)]);
+ return (data.classes||[]).filter(c=>allowedIds.has(String(c.id)));
 }
 function reportAllowedStudents(classId){
- const classes = reportAllowedClasses();
+ const classes=reportAllowedClasses();
  if(!classes.some(c=>String(c.id)===String(classId))) return [];
  return (data.students||[]).filter(s=>String(s.classId)===String(classId));
+}
+async function loadReportCardTeacherAccess(){
+ if(!document.getElementById('rcClass')) return;
+ reportClassTeacherAccessError='';
+ if(session?.role==='admin'){reportClassTeacherClassIds=[];reportClassTeacherAssessments=[];reportClassTeacherAssignments=[];document.getElementById('main').innerHTML=reportcards();return;}
+ if(!supabaseClient || !currentSchoolId || !session?.teacherId){reportClassTeacherAccessError='An active teacher login is required.';document.getElementById('main').innerHTML=reportcards();return;}
+ const {data:assignments,error}=await supabaseClient.from('class_teacher_assignments')
+   .select('class_id').eq('school_id',currentSchoolId).eq('teacher_id',session.teacherId).eq('is_active',true);
+ if(error){reportClassTeacherAccessError=error.message;reportClassTeacherClassIds=[];}
+ else reportClassTeacherClassIds=(assignments||[]).map(x=>String(x.class_id));
+ reportClassTeacherAssessments=[];reportClassTeacherAssignments=[];
+ const term=reportSelectedTerm||data.school.term||'Term 1';
+ for(const classId of reportClassTeacherClassIds){
+   const {data:subjectRows,error:subjectError}=await supabaseClient.rpc('get_class_teacher_report_subject_assignments',{p_class_id:String(classId),p_term:String(term)});
+   if(subjectError){reportClassTeacherAccessError='Class Teacher subject access is not fully enabled in Supabase. '+subjectError.message;break;}
+   reportClassTeacherAssignments.push(...(subjectRows||[]));
+   const {data:rows,error:rpcError}=await supabaseClient.rpc('get_class_teacher_report_assessments',{
+     p_class_id:String(classId),p_term:String(term),p_academic_year:String(data.school.year||'')
+   });
+   if(rpcError){reportClassTeacherAccessError='Class Teacher report access is not fully enabled in Supabase. '+rpcError.message;break;}
+   (rows||[]).forEach(a=>{
+     const t=(data.teachers||[]).find(x=>String(x.id)===String(a.teacher_id));
+     const sub=(data.subjects||[]).find(x=>String(x.id)===String(a.subject_id));
+     const c=(data.classes||[]).find(x=>String(x.id)===String(a.class_id));
+     const final=Number(a.final ?? ((a.formative||0)+(a.summative||0)));
+     reportClassTeacherAssessments.push({id:a.id,studentId:a.student_id,teacherId:a.teacher_id,subjectId:a.subject_id,classId:a.class_id,
+       teacherName:t?.name||'',subjectName:sub?.name||'',className:c?(c.name+(c.stream?' '+c.stream:'')):'',term:a.term||'',academicYear:a.academic_year||'',
+       classwork:Number(a.classwork||0),homework:Number(a.homework||0),quiz:Number(a.quiz_test||0),assignment:Number(a.assignment||0),
+       formative:Number(a.formative||0),summative:Number(a.summative||0),final,grade:grade(final),remark:remark(final)});
+   });
+ }
+ if(document.getElementById('rcClass')) document.getElementById('main').innerHTML=reportcards();
+}
+function reportTermChanged(value){
+ reportSelectedTerm=value;reportClassTeacherAssessments=[];
+ const area=document.getElementById('reportArea');if(area)area.innerHTML='';
+ if(session?.role==='teacher' && reportClassTeacherClassIds.length) loadReportCardTeacherAccess();
+ else if(document.getElementById('rcClass')) document.getElementById('main').innerHTML=reportcards();
 }
 function reportClassChanged(){
  reportSelectedClass = document.getElementById('rcClass')?.value || '';
@@ -1324,11 +1375,11 @@ function reportcards(){
  return `<h2>Report Cards</h2>
  <div class="toolbar">
  <label>Class <select id="rcClass" onchange="reportClassChanged()">${classes.map(c=>`<option value="${esc(c.id)}" ${String(c.id)===String(reportSelectedClass)?'selected':''}>${esc(c.name)}${c.stream?' - '+esc(c.stream):''}</option>`).join('')}</select></label>
- <label>Term <select id="rcTerm" onchange="reportSelectedTerm=this.value;document.getElementById('reportArea').innerHTML=''">${termOptions(term)}</select></label>
+ <label>Term <select id="rcTerm" onchange="reportTermChanged(this.value)">${termOptions(term)}</select></label>
  <label>Student <select id="rcStudent" onchange="reportSelectedStudent=this.value;document.getElementById('reportArea').innerHTML=''"><option value="">Select student</option>${students.map(s=>`<option value="${esc(s.id)}" ${String(s.id)===String(reportSelectedStudent)?'selected':''}>${esc(s.name)}</option>`).join('')}</select></label>
  <button onclick="showReportCard()">VIEW REPORT CARD</button>
  <button onclick="showOverallAverageReport()">OVERALL AVERAGE REPORT</button>
- </div><div id="reportArea"></div>`;
+ </div>${reportClassTeacherAccessError?`<div class="notice">${esc(reportClassTeacherAccessError)}</div>`:""}<div id="reportArea"></div>`;
 }
 function selectedReportStudent(){
  const classId = document.getElementById('rcClass')?.value;
@@ -1341,16 +1392,23 @@ function selectedReportStudent(){
 }
 function reportCardSubjectRows(student, term){
  const year=String(data.school?.year||'');
+ const isFullClassAccess=session?.role==='admin'||reportIsClassTeacher(student.classId);
  const assignedIds=[...new Set((data.assignments||[])
-   .filter(a=>String(a.classId)===String(student.classId) && (!a.term || a.term===term))
+   .filter(a=>String(a.classId)===String(student.classId) && (!a.term || a.term===term) &&
+     (session?.role==='admin'||String(a.teacherId)===String(session?.teacherId||'')))
    .map(a=>String(a.subjectId)).filter(Boolean))];
- const classSubjectIds=(data.classSubjects||[]).filter(x=>String(x.classId||x.class_id)===String(student.classId) && (!x.term || x.term===term)).map(x=>String(x.subjectId||x.subject_id)).filter(Boolean);
- const completeSubjectIds=[...new Set([...assignedIds,...classSubjectIds])];
- const subjectIds=completeSubjectIds.length?completeSubjectIds:[...new Set((data.assessments||[])
-   .filter(a=>String(a.studentId)===String(student.id) && String(a.classId||student.classId)===String(student.classId) && (a.term||'Term 1')===term && (!a.academicYear||String(a.academicYear)===year))
-   .map(a=>String(a.subjectId)).filter(Boolean))];
+ const classSubjectIds=[...(data.classSubjects||[]),...(reportClassTeacherAssignments||[])]
+   .filter(x=>String(x.classId||x.class_id)===String(student.classId) && (!x.term || x.term===term))
+   .map(x=>String(x.subjectId||x.subject_id)).filter(Boolean);
+ const fullSubjectIds=[...new Set([...assignedIds,...classSubjectIds])];
+ const subjectIds=isFullClassAccess
+   ? (fullSubjectIds.length?fullSubjectIds:[...new Set([...data.assessments,...reportClassTeacherAssessments]
+       .filter(a=>String(a.classId||student.classId)===String(student.classId) && (a.term||'Term 1')===term && (!a.academicYear||String(a.academicYear)===year))
+       .map(a=>String(a.subjectId)).filter(Boolean))])
+   : assignedIds;
+ const allRows=[...(data.assessments||[]),...(reportClassTeacherAssessments||[])];
  return subjectIds.map(subjectId=>{
-   const found=(data.assessments||[]).find(a=>String(a.studentId)===String(student.id) && String(a.subjectId)===subjectId && String(a.classId||student.classId)===String(student.classId) && (a.term||'Term 1')===term && (!a.academicYear||String(a.academicYear)===year));
+   const found=allRows.find(a=>String(a.studentId)===String(student.id) && String(a.subjectId)===subjectId && String(a.classId||student.classId)===String(student.classId) && (a.term||'Term 1')===term && (!a.academicYear||String(a.academicYear)===year));
    const subject=byId(data.subjects,subjectId);
    return found?{...found,subjectName:found.subjectName||subject?.name||'Subject',hasResult:found.final!==null&&found.final!==undefined&&found.final!==''}
      :{subjectId,subjectName:subject?.name||'Subject',formative:null,summative:null,final:null,hasResult:false};
@@ -1378,7 +1436,7 @@ function showOverallAverageReport(){
  const s=selectedReportStudent();if(!s)return;
  const terms=termList();
  const termRows=terms.map(term=>{
-   const rows=data.assessments.filter(a=>a.studentId===s.id&&String(a.classId||s.classId)===String(s.classId)&&(a.term||'Term 1')===term&&(!a.academicYear||String(a.academicYear)===String(data.school.year)));
+   const rows=reportCardSubjectRows(s,term).filter(a=>a.hasResult);
    const avg=rows.length?rows.reduce((x,a)=>x+Number(a.final||0),0)/rows.length:null;
    return {term,avg,count:rows.length};
  });
