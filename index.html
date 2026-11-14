@@ -2187,6 +2187,47 @@ function tresults(){
  .report-card-design .report-overall-position strong{font-size:16px!important}
 }
 
+
+/* Teacher Pending Tasks dashboard */
+.pending-summary-grid .stat{min-height:104px}
+.pending-teacher-list{display:grid;gap:16px;margin-top:18px}
+.pending-teacher-card{background:#fff;border:1px solid #dbe5ef;border-radius:14px;overflow:hidden;box-shadow:0 3px 12px rgba(15,23,42,.05)}
+.pending-teacher-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:16px 18px;background:#eef5fb;border-bottom:1px solid #dbe5ef}
+.pending-teacher-heading h3{margin:0 0 4px;font-size:18px;color:#12345a}
+.pending-teacher-heading span{font-size:13px;color:#526579}
+.pending-teacher-badge{background:#fff3df;color:#a65308!important;border:1px solid #f4d3a3;border-radius:999px;padding:6px 10px;font-weight:700;white-space:nowrap}
+.pending-task-row{display:grid;grid-template-columns:minmax(170px,1.5fr) minmax(100px,.6fr) minmax(130px,1fr) auto;gap:14px;align-items:center;padding:14px 18px;border-bottom:1px solid #edf1f5}
+.pending-task-row:last-child{border-bottom:0}
+.pending-task-title{font-weight:700;color:#172f4d}
+.pending-task-meta{font-size:13px;color:#64748b;margin-top:4px}
+.pending-task-count strong{display:block;color:#12345a;font-size:16px}
+.pending-task-count span{display:block;color:#b45309;font-size:12px;font-weight:700;margin-top:3px}
+.pending-progress-track{height:8px;border-radius:99px;background:#e8eef5;overflow:hidden}
+.pending-progress-track span{display:block;height:100%;background:#27845b;border-radius:99px}
+.pending-task-progress small{display:block;color:#64748b;margin-top:5px;font-size:11px}
+.pending-task-action button{white-space:nowrap}
+.pending-empty{text-align:center;padding:28px}
+@media(max-width:760px){
+ .pending-task-row{grid-template-columns:1fr 1fr;gap:10px}
+ .pending-task-progress{grid-column:1/2}
+ .pending-task-action{grid-column:2/3;justify-self:end}
+ .pending-teacher-heading{align-items:flex-start;flex-direction:column}
+}
+
+
+/* Compact teacher list: keep individual assessments collapsed until requested */
+.pending-teacher-details{border-top:1px solid #edf1f5}
+.pending-teacher-details>summary{list-style:none;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 18px;color:#155eaa;font-weight:700;font-size:14px}
+.pending-teacher-details>summary::-webkit-details-marker{display:none}
+.pending-teacher-details>summary:after{content:"＋";font-size:18px;color:#155eaa}
+.pending-teacher-details[open]>summary:after{content:"−"}
+.pending-teacher-details>summary span{margin-left:auto;background:#eaf2fb;color:#174b7a;border-radius:20px;padding:3px 9px;font-size:12px}
+.pending-teacher-details .pending-task-list{margin:0}
+.pending-teacher-details:not([open]){padding-bottom:0}
+.pending-teacher-heading{padding:13px 18px}
+.pending-teacher-heading h3{font-size:17px}
+.pending-teacher-heading>div>span{font-size:12px}
+
 </style><div class="vao-results-wrap"><table class="vao-results"><thead><tr><th class="vao-title" colspan="2"></th><th class="vao-title" colspan="${visibleSubjectIds.length*5+4}">${esc(data.school.name.toUpperCase())}<br>${esc(String(selectedTerm).toUpperCase())} RESULT — ${esc(cls(selectedClass).toUpperCase())}</th></tr><tr><th rowspan="2">S/N</th><th rowspan="2">NAME</th>${subjectHead}<th rowspan="2">TOTAL</th><th rowspan="2">AVERAGE</th><th rowspan="2">GRADE</th><th rowspan="2">POSITION</th></tr><tr>${subHead}</tr></thead><tbody>${rows}</tbody></table></div>`:`<div class="notice">No results are available for ${esc(cls(selectedClass))} in ${esc(selectedTerm)}.</div>`;
  return `<h2>Class Results</h2><p class="small">This result sheet uses the current school's name. Select term, class and subject. Formative Avg shows the formative score already recorded for each student in that subject (out of 40). Total, average and overall position still use all available subjects in the class.</p><div class="toolbar"><label>Term<select id="trTerm" onchange="teacherSelectedResultTerm=this.value;go('tresults')">${termOptions(selectedTerm)}</select></label><label>Class<select id="trClass" onchange="teacherSelectedResultClass=this.value;teacherSelectedResultSubject='all';go('tresults')">${classOptions}</select></label><label>Subject<select id="trSubject" onchange="teacherSelectedResultSubject=this.value;go('tresults')">${subjectOptions}</select></label></div><div class="card" style="overflow-x:auto"><p><b>School:</b> ${esc(data.school.name)} &nbsp; | &nbsp; <b>Class:</b> ${esc(cls(selectedClass))} &nbsp; | &nbsp; <b>Term:</b> ${esc(selectedTerm)} &nbsp; | &nbsp; <b>Students:</b> ${students.length}</p>${resultTable}</div>`;
 }
@@ -2773,15 +2814,65 @@ function markmonitor(){
  const teacherFilter=adminMarkTeacherFilter;
  const classFilter=adminMarkClassFilter;
  const subjectFilter=adminMarkSubjectFilter;
- const filtered=rows.filter(r=>(teacherFilter==='all'||String(r.a.teacherId)===teacherFilter)&&(classFilter==='all'||String(r.a.classId)===classFilter)&&(subjectFilter==='all'||String(r.a.subjectId)===subjectFilter));
- const total=filtered.reduce((n,r)=>n+r.total,0),entered=filtered.reduce((n,r)=>n+r.entered,0),pending=Math.max(0,total-entered),pct=total?Math.round(entered/total*100):0;
- return `<h2>Teacher & Marks Monitoring</h2><p class="notice">Monitor marks for this school only. A mark is counted as entered when a saved score exists for the student and scheduled activity.</p>
- <div class="formgrid"><label>Term<select id="mmTerm" onchange="adminMarkTerm=this.value;go('markmonitor')">${termOptions(term)}</select></label>
- <label>Teacher<select id="mmTeacher" onchange="adminMarkTeacherFilter=this.value;go('markmonitor')">${markMonitorOptions(data.teachers,teacherFilter,'All Teachers')}</select></label>
- <label>Class<select id="mmClass" onchange="adminMarkClassFilter=this.value;go('markmonitor')">${markMonitorOptions(data.classes.map(c=>({id:c.id,name:cls(c.id)})),classFilter,'All Classes')}</select></label>
- <label>Subject<select id="mmSubject" onchange="adminMarkSubjectFilter=this.value;go('markmonitor')">${markMonitorOptions(data.subjects,subjectFilter,'All Subjects')}</select></label></div>
- <div class="grid"><div class="stat">Expected Marks<strong>${total}</strong></div><div class="stat">Entered<strong>${entered}</strong></div><div class="stat">Pending<strong>${pending}</strong></div><div class="stat">Completion<strong>${pct}%</strong></div></div>
- <div class="card"><h3>Assessment completion by teacher</h3>${filtered.length?`<div class="table-wrap" style="overflow-x:auto"><table><thead><tr><th>Teacher</th><th>Class</th><th>Subject</th><th>Assessment</th><th>Entered</th><th>Pending</th><th>Progress</th><th>Action</th></tr></thead><tbody>${filtered.map(r=>{const label=(r.sch.activityType==='exam'?'Exam / Summative':r.sch.activityType==='assignment'?'Assignment / Project':r.sch.activityType[0].toUpperCase()+r.sch.activityType.slice(1))+' '+r.sch.activityNumber;return `<tr><td>${esc(r.teacher?.name||'Teacher')}</td><td>${esc(r.cl?cls(r.cl.id):'Class')}</td><td>${esc(r.subject?.name||'Subject')}</td><td>${esc(label)}</td><td>${r.entered}/${r.total}</td><td><b style="color:${r.pending?'#b45309':'#15803d'}">${r.pending}</b></td><td>${r.total?Math.round(r.entered/r.total*100):0}%</td><td><button onclick="adminOpenTask('${r.sch.id}','${r.a.teacherId}','${r.a.subjectId}','${r.a.classId}')">VIEW / EDIT</button></td></tr>`}).join('')}</tbody></table></div>`:'<p>No teacher assignments or active assessment schedules found for this term.</p>'}</div><div id="adminMarkEditor"></div>`;
+ const scoped=rows.filter(r=>
+  (teacherFilter==='all'||String(r.a.teacherId)===String(teacherFilter)) &&
+  (classFilter==='all'||String(r.a.classId)===String(classFilter)) &&
+  (subjectFilter==='all'||String(r.a.subjectId)===String(subjectFilter))
+ );
+ const pendingRows=scoped.filter(r=>r.total>0 && r.pending>0);
+ const total=pendingRows.reduce((n,r)=>n+r.total,0);
+ const entered=pendingRows.reduce((n,r)=>n+r.entered,0);
+ const pending=pendingRows.reduce((n,r)=>n+r.pending,0);
+ const pct=total?Math.round(entered/total*100):0;
+ const groups=new Map();
+ pendingRows.forEach(r=>{
+  const key=String(r.a.teacherId);
+  if(!groups.has(key))groups.set(key,{teacher:r.teacher,teacherId:r.a.teacherId,tasks:[]});
+  groups.get(key).tasks.push(r);
+ });
+ const teacherGroups=[...groups.values()].sort((a,b)=>(a.teacher?.name||'').localeCompare(b.teacher?.name||''));
+ const cards=teacherGroups.map(g=>{
+  const taskMarkup=g.tasks.map(r=>{
+   const type=r.sch.activityType||'Assessment';
+   const label=(type==='exam'?'Exam / Summative':type==='assignment'?'Assignment / Project':type.charAt(0).toUpperCase()+type.slice(1))+' '+r.sch.activityNumber;
+   const progress=r.total?Math.round(r.entered/r.total*100):0;
+   const status=r.entered===0?'Not Started':'In Progress';
+   return `<div class="pending-task-row">
+    <div class="pending-task-main"><div class="pending-task-title">${esc(label)}</div><div class="pending-task-meta">${esc(r.cl?cls(r.cl.id):'Class')} · ${esc(r.subject?.name||'Subject')}</div></div>
+    <div class="pending-task-count"><strong>${r.entered}/${r.total}</strong><span>${r.pending} pending</span></div>
+    <div class="pending-task-progress"><div class="pending-progress-track"><span style="width:${progress}%"></span></div><small>${progress}% · ${status}</small></div>
+    <div class="pending-task-action"><button onclick="adminOpenTask('${r.sch.id}','${r.a.teacherId}','${r.a.subjectId}','${r.a.classId}')">VIEW / EDIT</button></div>
+   </div>`;
+  }).join('');
+  const missing=g.tasks.reduce((n,r)=>n+r.pending,0);
+  const taskSummary=g.tasks.length===1?'1 unfinished assessment':`${g.tasks.length} unfinished assessments`;
+  return `<section class="pending-teacher-card">
+   <div class="pending-teacher-heading">
+    <div><h3>${esc(g.teacher?.name||'Teacher')}</h3><span>${taskSummary} · ${missing} marks missing</span></div>
+    <span class="pending-teacher-badge">PENDING</span>
+   </div>
+   <details class="pending-teacher-details">
+    <summary>View pending assessments <span>${g.tasks.length}</span></summary>
+    <div class="pending-task-list">${taskMarkup}</div>
+   </details>
+  </section>`;
+ }).join('');
+ return `<h2>Teacher Pending Tasks</h2>
+ <p class="notice">This page shows only assessments that still have missing marks. Each teacher is listed once; completed assessments and teachers without pending work are hidden.</p>
+ <div class="formgrid">
+  <label>Term<select id="mmTerm" onchange="adminMarkTerm=this.value;go('markmonitor')">${termOptions(term)}</select></label>
+  <label>Teacher<select id="mmTeacher" onchange="adminMarkTeacherFilter=this.value;go('markmonitor')">${markMonitorOptions(data.teachers,teacherFilter,'All Teachers')}</select></label>
+  <label>Class<select id="mmClass" onchange="adminMarkClassFilter=this.value;go('markmonitor')">${markMonitorOptions(data.classes.map(c=>({id:c.id,name:cls(c.id)})),classFilter,'All Classes')}</select></label>
+  <label>Subject<select id="mmSubject" onchange="adminMarkSubjectFilter=this.value;go('markmonitor')">${markMonitorOptions(data.subjects,subjectFilter,'All Subjects')}</select></label>
+ </div>
+ <div class="grid pending-summary-grid">
+  <div class="stat">Teachers with pending work<strong>${teacherGroups.length}</strong></div>
+  <div class="stat">Pending assessments<strong>${pendingRows.length}</strong></div>
+  <div class="stat">Marks still missing<strong>${pending}</strong></div>
+  <div class="stat">Progress on pending tasks<strong>${pct}%</strong></div>
+ </div>
+ <div class="pending-teacher-list">${cards||`<div class="card pending-empty"><h3>All caught up!</h3><p>No pending assessments were found for the selected filters and term.</p></div>`}</div>
+ <div id="adminMarkEditor"></div>`;
 }
 async function loadAdminMarkMonitor(){
  if(session?.role!=='admin')return;
